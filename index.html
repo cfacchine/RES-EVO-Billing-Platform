@@ -70,10 +70,10 @@ input[type=number]{-moz-appearance:textfield} input[type=number]::-webkit-outer-
 .period label{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .period select{min-width:120px}
 
-.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:22px}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:22px}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 16px 14px;position:relative;overflow:hidden;box-shadow:var(--shadow-sm)}
 .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--green)}
-.kpi.warn::before{background:var(--warn)}.kpi.crit::before{background:var(--crit)}.kpi.info::before{background:var(--info)}
+.kpi.warn::before{background:var(--warn)}.kpi.crit::before{background:var(--crit)}.kpi.info::before{background:var(--info)}.kpi.ok::before{background:var(--ok)}
 .kpi .k-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .kpi .k-val{font-family:"Archivo";font-weight:800;font-size:26px;letter-spacing:-.02em;margin-top:8px;line-height:1}
 .kpi .k-sub{font-size:11.5px;color:var(--muted);margin-top:7px} .kpi .k-sub b{color:var(--text);font-weight:600}
@@ -133,6 +133,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 .unitbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:"Archivo";letter-spacing:.03em}
 .u755{background:var(--green-tint);color:var(--green-deep)} .u765{background:var(--info-bg);color:var(--info)}
 .yn-y{color:var(--ok);font-weight:600} .yn-n{color:var(--warn);font-weight:600}
+.paid-row{background:rgba(46,158,79,.09)} .paid-row td:nth-child(2){text-decoration:line-through;opacity:.75}
 .agecell{display:inline-flex;align-items:center;gap:7px} .agestripe{width:4px;height:14px;border-radius:2px;display:inline-block}
 .err-dot{color:var(--crit);font-weight:700}
 .chev{display:inline-block;transition:transform .15s;color:var(--muted-2);font-size:11px} tr.main.open .chev{transform:rotate(90deg)}
@@ -337,9 +338,10 @@ table.data tbody tr:last-child td{border-bottom:none}
           <select id="fOper" onchange="renderDesk()"><option value="">All operators</option></select>
           <select id="fSigned" onchange="renderDesk()"><option value="">Signed: any</option><option value="Yes">Signed: Yes</option><option value="No">Signed: No</option></select>
           <select id="fPO" onchange="renderDesk()"><option value="">PO: any</option><option value="Yes">PO assigned</option><option value="No">No PO</option></select>
+          <select id="fPaid" onchange="renderDesk()"><option value="">Paid: any</option><option value="No">Open (unpaid)</option><option value="Yes">Paid · closed</option></select>
         </div>
         <div class="tablewrap"><table class="data">
-          <thead><tr><th style="width:26px"></th><th>Date</th><th>Invoice #</th><th>PO Request #</th><th>Operator</th><th>Location</th><th>Unit</th><th class="r">Amount</th><th>Signed</th><th>PO</th><th>Aging</th></tr></thead>
+          <thead><tr><th style="width:26px"></th><th>Date</th><th>Invoice #</th><th>PO Request #</th><th>Operator</th><th>Location</th><th>Unit</th><th class="r">Amount</th><th>Signed</th><th>PO</th><th>Paid</th><th>Aging</th></tr></thead>
           <tbody id="deskBody"></tbody>
         </table></div>
       </div>
@@ -348,17 +350,18 @@ table.data tbody tr:last-child td{border-bottom:none}
 
   <!-- BILLING TRACKER -->
   <section class="view" id="view-tracker">
-    <div class="section-head"><div><div class="eyebrow">Maintain</div><h2>Billing Tracker</h2><div class="sub">Update <b>Signed</b>, <b>PO Assigned</b>, and <b>Reminder Sent</b> on any invoice. Saves to the sheet when live.</div></div></div>
+    <div class="section-head"><div><div class="eyebrow">Maintain</div><h2>Billing Tracker</h2><div class="sub">Mark <b>Paid</b> to close an invoice out — with or without a PO — and update <b>Signed</b>, <b>PO Assigned</b>, and <b>Reminder</b>. Saves to the sheet when live.</div></div></div>
     <div class="card"><div class="card-b">
       <div class="toolbar">
         <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="tSearch" placeholder="Search invoice, PO request, location…" oninput="renderTracker()"></div>
         <span class="sep"></span>
         <select id="tUnit" onchange="renderTracker()"><option value="">All units</option><option value="755">755 · Equipment</option><option value="765">765 · Operations</option></select>
+        <select id="tPaid" onchange="renderTracker()"><option value="">Paid: any</option><option value="No">Open (unpaid)</option><option value="Yes">Paid · closed</option></select>
         <select id="tSigned" onchange="renderTracker()"><option value="">Signed: any</option><option value="Yes">Signed: Yes</option><option value="No">Signed: No</option></select>
         <select id="tPO" onchange="renderTracker()"><option value="">PO: any</option><option value="Yes">PO assigned</option><option value="No">No PO</option></select>
       </div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>Date</th><th>Invoice #</th><th>PO Request #</th><th>Operator</th><th>Location</th><th>Unit</th><th class="r">Amount</th><th style="width:82px">Signed</th><th style="width:96px">PO Assigned</th><th style="width:100px">Reminder</th><th style="width:66px"></th></tr></thead>
+        <thead><tr><th>Date</th><th>Invoice #</th><th>PO Request #</th><th>Operator</th><th>Location</th><th>Unit</th><th class="r">Amount</th><th style="width:84px">Paid</th><th style="width:82px">Signed</th><th style="width:96px">PO Assigned</th><th style="width:100px">Reminder</th><th style="width:66px"></th></tr></thead>
         <tbody id="trackBody"></tbody>
       </table></div>
     </div></div>
@@ -472,10 +475,11 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid"];
 const TODAY = new Date("2026-08-22T00:00:00");
 let DATA = { rows: [] };
 let LIVE = false;
+let LIVE_PAID = false;   // true once the deployed backend returns a "paid" field (redeploy required)
 let RECORDS = {};        // in-memory line-item store for records generated this session (Feature 2)
 
 /* ============================ DATA MODEL ============================ */
@@ -488,16 +492,17 @@ function parseNotes(n){ n=String(n||""); var fleet=""; var fm=n.match(/Fleet\s*#
   return {operator:operator, location:location, disc:disc, fleet:fleet}; }
 function toRows(arr){ return arr.map(function(r,ix){ var o={}; COLS.forEach(function(c,i){o[c]=r[i];}); o.amount=Number(o.amount)||0; o.id=ix;
   var p=parseNotes(o.notes); o.operator=p.operator; o.location=p.location; o.disc=p.disc; o.fleet=p.fleet; o.unit=unitFromInv(o.inv);
-  o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent);
+  o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent); o.paid=yn(o.paid);
   o.age=Math.max(0,Math.round((TODAY-new Date(o.date+"T00:00:00"))/86400000)); o.bucket=ageBucket(o.age); return o; }); }
-function needsSig(x){ return x.signed!=="Yes"; }
-function needsPO(x){ return x.poAssigned!=="Yes"; }
+function isPaid(x){ return x.paid==="Yes"; }
+function needsSig(x){ return !isPaid(x) && x.signed!=="Yes"; }
+function needsPO(x){ return !isPaid(x) && x.poAssigned!=="Yes"; }
 
 async function loadData(manual){
   if(CONFIG.EXEC_URL){
     try{ setMode("Loading…");
       var j=await fetch(CONFIG.EXEC_URL+"?action=summary").then(function(r){return r.json();});
-      if(j&&j.rows){ DATA.rows=toRows(j.rows.map(function(r){return COLS.map(function(c){return r[c];});}));
+      if(j&&j.rows){ LIVE_PAID = !!(j.rows.length && Object.prototype.hasOwnProperty.call(j.rows[0],"paid")); DATA.rows=toRows(j.rows.map(function(r){return COLS.map(function(c){return r[c];});}));
         LIVE=true; setMode("Live · sheet"); demoOff(); await loadLiveConfig(); renderAll(); if(manual) toast("Refreshed from the live sheet"); return; }
       throw 0;
     }catch(e){ LIVE=false; setMode("Demo data · sheet unreachable"); DATA.rows=toRows(SAMPLE); renderAll(); if(manual) toast("Couldn’t reach the web app — showing imported sample","warn"); return; }
@@ -534,15 +539,17 @@ function renderDash(){ renderKpis(); renderNeeds(); renderUnitBars(); renderDesk
 
 function renderKpis(){
   var r=dashRows(), total=r.reduce(function(a,x){return a+x.amount;},0);
+  var paid=r.filter(isPaid), paidAmt=paid.reduce(function(a,x){return a+x.amount;},0);
+  var open=r.filter(function(x){return !isPaid(x);}), openAmt=open.reduce(function(a,x){return a+x.amount;},0);
   var uns=r.filter(needsSig), unsAmt=uns.reduce(function(a,x){return a+x.amount;},0);
   var noPO=r.filter(needsPO), noPOAmt=noPO.reduce(function(a,x){return a+x.amount;},0);
-  var rem=r.filter(function(x){return x.reminderSent==="Yes";});
-  var aging=r.filter(function(x){return (needsSig(x)||needsPO(x))&&x.age>60;});
+  var aging=r.filter(function(x){return !isPaid(x)&&x.age>60;});
   var k=[
     {l:"Total Billed",v:money0(total),s:"<b>"+r.length+"</b> invoices",c:""},
-    {l:"Unsigned",v:money0(unsAmt),s:"<b>"+uns.length+"</b> to sign",c:"warn"},
+    {l:"Paid",v:money0(paidAmt),s:"<b>"+paid.length+"</b> closed",c:"ok"},
+    {l:"Outstanding",v:money0(openAmt),s:"<b>"+open.length+"</b> open",c:"warn"},
+    {l:"Unsigned",v:money0(unsAmt),s:"<b>"+uns.length+"</b> to sign",c:""},
     {l:"Awaiting PO",v:money0(noPOAmt),s:"<b>"+noPO.length+"</b> no PO",c:"info"},
-    {l:"Reminders Sent",v:rem.length,s:"this period",c:""},
     {l:"Aging 60+",v:aging.length,s:"open &amp; overdue",c:aging.length?"crit":""}
   ];
   document.getElementById("kpis").innerHTML=k.map(function(x){return '<div class="kpi '+x.c+'"><div class="k-label">'+x.l+'</div><div class="k-val num">'+x.v+'</div><div class="k-sub">'+x.s+'</div></div>';}).join("");
@@ -589,9 +596,9 @@ function buildOperFilter(){ var ops=[...new Set(DATA.rows.map(function(x){return
 var deskOpen={};
 function renderDesk(){
   var q=(document.getElementById("fSearch").value||"").toLowerCase();
-  var fu=document.getElementById("fUnit").value,fo=document.getElementById("fOper").value,fg=document.getElementById("fSigned").value,fp=document.getElementById("fPO").value;
+  var fu=document.getElementById("fUnit").value,fo=document.getElementById("fOper").value,fg=document.getElementById("fSigned").value,fp=document.getElementById("fPO").value,fpd=document.getElementById("fPaid").value;
   var rows=dashRows().filter(function(x){
-    if(fu&&x.unit!==fu)return false; if(fo&&x.operator!==fo)return false; if(fg&&x.signed!==fg)return false; if(fp&&x.poAssigned!==fp)return false;
+    if(fu&&x.unit!==fu)return false; if(fo&&x.operator!==fo)return false; if(fg&&x.signed!==fg)return false; if(fp&&x.poAssigned!==fp)return false; if(fpd&&x.paid!==fpd)return false;
     if(q){ var hay=(x.inv+" "+x.poReq+" "+x.location+" "+x.disc+" "+x.operator).toLowerCase(); if(hay.indexOf(q)<0)return false; }
     return true;
   }).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
@@ -606,21 +613,23 @@ function renderDesk(){
       +'<td class="r num">'+money(x.amount)+'</td>'
       +'<td class="'+(x.signed==="Yes"?"yn-y":"yn-n")+'">'+x.signed+'</td>'
       +'<td class="'+(x.poAssigned==="Yes"?"yn-y":"yn-n")+'">'+x.poAssigned+'</td>'
+      +'<td class="'+(x.paid==="Yes"?"yn-y":"yn-n")+'">'+x.paid+'</td>'
       +'<td><span class="agecell"><span class="agestripe" style="background:'+astripe[x.bucket]+'"></span>'+x.age+'d</span></td></tr>';
     if(!op) return main;
     var openBtn='<button class="btn sm" onclick="event.stopPropagation();openRecord('+x.id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>Open in builder</button>';
     var remBtn='<button class="btn sm" onclick="event.stopPropagation();reminder('+x.id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Reminder</button>';
-    var exp='<tr class="expand"><td colspan="11"><div class="exp-inner"><div class="exp-grid">'
+    var exp='<tr class="expand"><td colspan="12"><div class="exp-inner"><div class="exp-grid">'
       +'<div class="e"><b>Bill To</b>'+(x.unit==="755"?"Evolution Well Services":"EWS Operating LLC")+' ('+x.unit+')</div>'
       +'<div class="e"><b>Fleet</b>#'+esc(x.fleet)+' · '+esc(x.operator)+'</div>'
       +'<div class="e"><b>Disc</b>'+(esc(x.disc)||"—")+'</div>'
       +'<div class="e"><b>Signed</b>'+x.signed+'</div>'
       +'<div class="e"><b>PO Assigned</b>'+x.poAssigned+'</div>'
+      +'<div class="e"><b>Paid</b>'+x.paid+'</div>'
       +'<div class="e"><b>Reminder</b>'+x.reminderSent+'</div>'
       +'<div class="e"><b>Aging</b>'+x.age+' days · '+x.bucket+'</div></div>'
       +'<div class="exp-actions">'+openBtn+remBtn+'</div></div></td></tr>';
     return main+exp;
-  }).join("")||'<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:26px">No matching rows.</td></tr>';
+  }).join("")||'<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:26px">No matching rows.</td></tr>';
   document.getElementById("deskCount").textContent=rows.length+" of "+dashRows().length;
 }
 function toggleDesk(id){ deskOpen[id]=!deskOpen[id]; renderDesk(); }
@@ -725,7 +734,7 @@ function buildDoc(v){
     ||'<tr><td class="gut"></td><td colspan="5" style="color:#aaa;padding:12px 8px">Add line items to populate the document…</td></tr>';
   var secLabel=(b.key==="755"?"FLAT RATE — EQUIPMENT SERVICE":"FLAT RATE — RIG UP / RIG DOWN");
   return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c">'+esc(c.division)+'<br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
-    +'<div class="doc-title"><div class="dt">'+(isInv?"FIELD TICKET INVOICE":"SERVICE TICKET PO REQUEST")+'</div><div class="dn">INVOICE #: EWS - <b>'+esc(invNo)+'</b></div></div></div>'
+    +'<div class="doc-title"><div class="dt">'+(isInv?"INVOICE":"PO REQUEST")+'</div><div class="dn">INVOICE #: EWS - <b>'+esc(invNo)+'</b></div></div></div>'
     +'<div class="doc-rule"></div><div class="doc-meta"><div class="doc-billto"><div class="l">Bill To</div><div class="n">'+esc(bt.name)+'</div><div class="a">'+esc(bt.a1)+' · '+esc(bt.a2)+' · '+esc(bt.a3)+'</div></div>'
     +meta.map(function(m){return '<div class="m"><span class="l">'+esc(m[0])+'</span><span class="v">'+esc(m[1])+'</span></div>';}).join("")+'</div>'
     +'<div class="doc-secbar">'+secLabel+'</div><table class="doc-tbl"><thead><tr><th class="gut"></th><th>Description</th><th class="c">Qty</th><th class="c">Unit</th><th class="r">Per Unit</th><th class="r">Amount</th></tr></thead><tbody>'+rows+'</tbody></table>'
@@ -830,23 +839,24 @@ function reminder(id){
 /* ============================ TRACKER EDITOR ============================ */
 function renderTracker(){
   var q=(document.getElementById("tSearch").value||"").toLowerCase();
-  var fu=document.getElementById("tUnit").value,fg=document.getElementById("tSigned").value,fp=document.getElementById("tPO").value;
-  var rows=DATA.rows.filter(function(x){ if(fu&&x.unit!==fu)return false; if(fg&&x.signed!==fg)return false; if(fp&&x.poAssigned!==fp)return false;
+  var fu=document.getElementById("tUnit").value,fg=document.getElementById("tSigned").value,fp=document.getElementById("tPO").value,fpd=document.getElementById("tPaid").value;
+  var rows=DATA.rows.filter(function(x){ if(fu&&x.unit!==fu)return false; if(fpd&&x.paid!==fpd)return false; if(fg&&x.signed!==fg)return false; if(fp&&x.poAssigned!==fp)return false;
     if(q){ var hay=(x.inv+" "+x.poReq+" "+x.location+" "+x.operator).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; }).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
   var ynSel=function(id,field,val){ return '<select class="tr-sel" onchange="editRow('+id+',\''+field+'\',this.value)"><option '+(val==="Yes"?"selected":"")+'>Yes</option><option '+(val!=="Yes"?"selected":"")+'>No</option></select>'; };
-  document.getElementById("trackBody").innerHTML=rows.map(function(x){return '<tr>'
+  document.getElementById("trackBody").innerHTML=rows.map(function(x){return '<tr class="'+(x.paid==="Yes"?"paid-row":"")+'">'
     +'<td class="mono">'+fmtDate(x.date)+'</td><td class="mono">'+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td>'
     +'<td>'+esc(x.operator)+'</td><td>'+esc(x.location)+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
     +'<td class="r num">'+money(x.amount)+'</td>'
-    +'<td>'+ynSel(x.id,"signed",x.signed)+'</td><td>'+ynSel(x.id,"poAssigned",x.poAssigned)+'</td><td>'+ynSel(x.id,"reminder",x.reminderSent)+'</td>'
+    +'<td>'+ynSel(x.id,"paid",x.paid)+'</td><td>'+ynSel(x.id,"signed",x.signed)+'</td><td>'+ynSel(x.id,"poAssigned",x.poAssigned)+'</td><td>'+ynSel(x.id,"reminder",x.reminderSent)+'</td>'
     +'<td><span class="saved-flash" id="flash-'+x.id+'">✓ saved</span></td></tr>';}).join("")
-    ||'<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:26px">No matching rows.</td></tr>';
+    ||'<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:26px">No matching rows.</td></tr>';
 }
 function editRow(id,field,val){
   var row=DATA.rows.find(function(r){return r.id===id;}); if(!row) return;
-  if(field==="signed") row.signed=val; else if(field==="poAssigned") row.poAssigned=val; else if(field==="reminder") row.reminderSent=val;
+  if(field==="signed") row.signed=val; else if(field==="poAssigned") row.poAssigned=val; else if(field==="reminder") row.reminderSent=val; else if(field==="paid") row.paid=val;
   var flash=document.getElementById("flash-"+id); if(flash){ flash.classList.add("on"); setTimeout(function(){flash.classList.remove("on");},1400); }
   renderDash();
+  if(field==="paid"&&LIVE&&!LIVE_PAID){ toast("Paid updated on screen — redeploy the backend (new version) to save Paid to the sheet","warn"); return; }
   if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:row.inv,poReq:row.poReq,field:field,value:val}}).catch(function(){toast("Couldn’t save the change","warn");});
 }
 
