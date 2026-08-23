@@ -123,10 +123,12 @@ select:focus,input:focus,textarea:focus{outline:none;border-color:var(--green);b
 .chip-toggle.on{color:#fff;background:var(--crit);border-color:var(--crit)}
 
 .tablewrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--line)}
-table.data{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);min-width:820px}
-table.data thead th{background:var(--ink);color:#fff;font-family:"Archivo";font-weight:600;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;text-align:left;padding:10px 12px;white-space:nowrap;position:sticky;top:0}
+table.data{width:100%;border-collapse:collapse;font-size:12px;background:var(--card);min-width:720px}
+table.data thead th{background:var(--ink);color:#fff;font-family:"Archivo";font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;text-align:left;padding:9px 8px;white-space:nowrap;position:sticky;top:0;z-index:2}
 table.data thead th.r{text-align:right}
-table.data tbody td{padding:9px 12px;border-bottom:1px solid var(--line-2);white-space:nowrap;vertical-align:middle}
+table.data thead th:last-child{right:0;z-index:4;box-shadow:-7px 0 8px -7px rgba(0,0,0,.28)}
+table.data tbody td{padding:8px 8px;border-bottom:1px solid var(--line-2);white-space:nowrap;vertical-align:middle}
+table.data tbody td:last-child{position:sticky;right:0;z-index:1;background:var(--card);box-shadow:-7px 0 8px -7px rgba(0,0,0,.14)}
 table.data tbody td.r{text-align:right;font-variant-numeric:tabular-nums}
 table.data tbody tr.main{cursor:pointer} table.data tbody tr.main:hover{background:var(--card-2)}
 table.data tbody tr:last-child td{border-bottom:none}
@@ -216,7 +218,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 .doc-thanks{font-family:"Archivo";font-weight:800;font-size:15px;font-style:italic;color:#1a7a3e;text-align:right}
 .doc-footbar{border-top:2px solid #1a7a3e;margin-top:14px;padding-top:7px;display:flex;justify-content:space-between;font-size:8.5px;color:#1a7a3e;font-weight:600} .doc-footbar .r{color:#999;font-weight:500;text-align:right}
 
-.tr-sel{padding:5px 8px;font-size:12px;border-radius:6px} .saved-flash{color:var(--ok);font-size:11px;font-weight:600;opacity:0;transition:opacity .2s} .saved-flash.on{opacity:1}
+.tr-sel{padding:4px 6px;font-size:11.5px;border-radius:6px} .saved-flash{color:var(--ok);font-size:10.5px;font-weight:600;opacity:0;transition:opacity .2s} .saved-flash.on{opacity:1}
 
 .modal{position:fixed;inset:0;z-index:80;background:rgba(10,18,12,.62);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto} .modal.open{display:flex}
 .modal-inner{max-width:760px;width:100%}
@@ -377,7 +379,7 @@ table.data tbody tr:last-child td{border-bottom:none}
         <select id="tPO" onchange="renderTracker()"><option value="">PO: any</option><option value="Yes">PO assigned</option><option value="No">No PO</option></select>
       </div>
       <div class="tablewrap"><table class="data">
-        <thead><tr><th>Date</th><th>Invoice #</th><th>PO Request #</th><th>Operator</th><th>Location</th><th>Unit</th><th class="r">Amount</th><th style="width:84px">Paid</th><th style="width:82px">Signed</th><th style="width:96px">PO Assigned</th><th style="width:100px">Reminder</th><th style="width:66px"></th></tr></thead>
+        <thead><tr><th>Date</th><th>Invoice #</th><th>PO Request #</th><th>Operator</th><th>Location</th><th>Unit</th><th class="r">Amount</th><th style="width:60px">Paid</th><th style="width:62px">Signed</th><th style="width:56px">PO</th><th style="width:74px">Reminder</th><th style="width:78px"></th></tr></thead>
         <tbody id="trackBody"></tbody>
       </table></div>
     </div></div>
@@ -438,6 +440,9 @@ const EXTRA_CONTACTS = [
   { name:"Dominico Chero", email:"Dchero@beusaenergy.com", phone:"" },
   { name:"Ryan Adams", email:"radams@beusaenergy.com", phone:"" }
 ];
+/* Operator (Lists!A) + Disc (Lists!B) dropdown sources — defaults; refreshed live from the sheet's Lists tab */
+let OPERATORS = ["EQT","CNX","EOG","Encino","NNE","SB","BHE","Ascent","Evolution","Range","RES","Shop","Other"];
+let DISC = ["Rig Up","Rig Down","Equipment Service","Emergency","Roustabout","Misc","Service","Digital Asset Management"];
 function fleetRec(f){ return DIRECTORY.find(d=>d.fleet===String(f))||null; }
 function contactByName(n){ return DIRECTORY.concat(EXTRA_CONTACTS).find(c=>c.name===n)||null; }
 function contactForRow(x){ if(x&&x.contactEmail) return {name:x.contactName||x.operator||"", email:x.contactEmail, phone:x.contactPhone||""}; if(x&&x.fleet){ var f=fleetRec(x.fleet); if(f) return f; } if(x&&x.operator){ var op=String(x.operator).toLowerCase(); var d=DIRECTORY.find(function(e){return String(e.operator||"").toLowerCase()===op;}); if(d) return d; } return null; }
@@ -499,7 +504,7 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl"];
 const TODAY = new Date("2026-08-22T00:00:00");
 const REMIND_DAYS = 7;   // remind on invoices still open this many days after being sent for signature
 let DATA = { rows: [] };
@@ -543,6 +548,9 @@ async function loadLiveConfig(){
     if(sc&&Array.isArray(sc['765'])&&sc['765'].length) RATES['765']=sc['765']; }catch(e){}
   try{ var dr=await fetch(CONFIG.EXEC_URL+"?action=directory").then(function(r){return r.json();});
     if(dr&&dr.fleets&&dr.fleets.length){ DIRECTORY.length=0; dr.fleets.forEach(function(f){DIRECTORY.push(f);}); } }catch(e){}
+  try{ var ls=await fetch(CONFIG.EXEC_URL+"?action=lists").then(function(r){return r.json();});
+    if(ls&&Array.isArray(ls.operators)&&ls.operators.length) OPERATORS=ls.operators;
+    if(ls&&Array.isArray(ls.disc)&&ls.disc.length) DISC=ls.disc; }catch(e){}
 }
 function setMode(t){ document.getElementById("dataMode").textContent=t; }
 function demoOff(){ var b=document.getElementById("demoBanner"); if(b) b.style.display="none"; }
@@ -769,6 +777,10 @@ function workType(s){ return [s.operator,s.location,s.disc].filter(Boolean).join
 
 function renderBuilder(v){
   var b=B[v], s=state[v], bt=CONFIG.BILLTO[b.key];
+  if(!s.po) s.po=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000");            // Customer PO # template prefill
+  var poReqShown = s.poReq || (s.mode==="PO REQUEST" ? nextPoReq() : ""); // show next PO Request # without locking it in
+  var opOpts=OPERATORS.map(function(o){return '<option value="'+esc(o)+'">';}).join("");
+  var discOpts=DISC.map(function(d){return '<option value="'+esc(d)+'">';}).join("");
   var fleetOpts=DIRECTORY.map(function(d){return '<option value="'+d.fleet+'" '+(s.fleet===d.fleet?"selected":"")+'>Fleet #'+d.fleet+' · '+d.operator+'</option>';}).join("");
   var contactOpts=DIRECTORY.concat(EXTRA_CONTACTS).map(function(c){return '<option value="'+esc(c.name)+'" '+(s.contact===c.name?"selected":"")+'>'+esc(c.name)+'</option>';}).join("");
   var html='<div class="section-head"><div><div class="eyebrow">'+(b.key==="755"?"Equipment Service · Evolution Well Services":"Operations · Evolution Well Services Operating")+'</div>'
@@ -777,16 +789,16 @@ function renderBuilder(v){
     +'<div class="form-sec"><h4>Job Header <span class="rule"></span></h4><div class="fgrid">'
     +'<div class="f"><label>Bill To (fixed)</label><div class="fixed-val">'+esc(bt.name)+'</div></div>'
     +'<div class="f"><label>Fleet #</label><select onchange="setFleet(\''+v+'\',this.value)">'+fleetOpts+'</select></div>'
-    +'<div class="f"><label>Operator</label><input type="text" value="'+esc(s.operator)+'" oninput="upd(\''+v+'\',\'operator\',this.value)"></div>'
+    +'<div class="f"><label>Operator</label><input type="text" list="dl-op-'+v+'" value="'+esc(s.operator)+'" oninput="upd(\''+v+'\',\'operator\',this.value)" placeholder="Pick or type…" autocomplete="off"><datalist id="dl-op-'+v+'">'+opOpts+'</datalist></div>'
     +'<div class="f"><label>Location</label><input type="text" value="'+esc(s.location)+'" oninput="upd(\''+v+'\',\'location\',this.value)" placeholder="Charley Pad"></div>'
-    +'<div class="f full"><label>Disc</label><input type="text" value="'+esc(s.disc)+'" oninput="upd(\''+v+'\',\'disc\',this.value)" placeholder="Service Bill / Rig Down / Emergency Service"></div>'
+    +'<div class="f full"><label>Disc</label><input type="text" list="dl-disc-'+v+'" value="'+esc(s.disc)+'" oninput="upd(\''+v+'\',\'disc\',this.value)" placeholder="Pick or type… (Rig Up / Rig Down / Equipment Service…)" autocomplete="off"><datalist id="dl-disc-'+v+'">'+discOpts+'</datalist></div>'
     +'<div class="f full"><label>Work Type (auto)</label><div class="auto-val" id="wt-'+v+'"><span class="tagauto">auto</span><span>'+(esc(workType(s))||"Operator – Location – Disc")+'</span></div></div>'
     +'<div class="f"><label>Contact</label><select onchange="setContact(\''+v+'\',this.value)">'+contactOpts+'</select></div>'
     +'<div class="f"><label>Contact Info (auto)</label><div class="auto-val" id="ci-'+v+'">'+(esc(s.contactInfo)||"—")+'</div></div>'
     +'<div class="f"><label>Start Date</label><input type="date" value="'+esc(s.start)+'" oninput="upd(\''+v+'\',\'start\',this.value)"></div>'
     +'<div class="f"><label>End Date</label><input type="date" value="'+esc(s.end)+'" oninput="upd(\''+v+'\',\'end\',this.value)"></div></div></div>'
     +'<div class="form-sec"><h4>Document Numbers <span class="rule"></span></h4><div class="fgrid">'
-    +'<div class="f"><label>PO Request #</label><div style="display:flex;gap:6px;align-items:stretch"><input style="flex:1;min-width:0" type="text" value="'+esc(s.poReq)+'" oninput="upd(\''+v+'\',\'poReq\',this.value)" placeholder="EWS-POR-000024"><button class="btn sm" type="button" onclick="pullFromPoReq(\''+v+'\')" title="Type a PO Request # then Pull to auto-fill the invoice">Pull ▸</button></div></div>'
+    +'<div class="f"><label>PO Request #</label><div style="display:flex;gap:6px;align-items:stretch"><input style="flex:1;min-width:0" type="text" value="'+esc(poReqShown)+'" oninput="upd(\''+v+'\',\'poReq\',this.value)" placeholder="EWS-POR-000024"><button class="btn sm" type="button" onclick="pullFromPoReq(\''+v+'\')" title="Type a PO Request # then Pull to auto-fill the invoice">Pull ▸</button></div></div>'
     +'<div class="f"><label>Customer PO #</label><input type="text" value="'+esc(s.po)+'" oninput="upd(\''+v+'\',\'po\',this.value)" placeholder="'+(b.key==="755"?"EWS-PO-3687":"EWSO-PO-1458")+'"></div>'
     +'<div class="f"><label>Invoice #</label><input type="text" value="'+esc(s.inv)+'" oninput="upd(\''+v+'\',\'inv\',this.value)" placeholder="'+(b.key==="755"?"e.g. 510078":"e.g. 500494")+'"></div>'
     +'<div class="f"><label>Doc Date</label><input type="date" value="'+esc(s.date)+'" oninput="upd(\''+v+'\',\'date\',this.value)"></div></div></div>'
@@ -850,7 +862,8 @@ function buildDoc(v){
   var num=isInv?(s.inv||nextInv(b.key==="755"?"51":"50")):(s.poReq||nextPoReq());
   var invNo=s.inv||nextInv(b.key==="755"?"51":"50");
   var wt=workType(s)||"—";
-  var meta=[["Date",fmtDate(s.date)],["Start Date",s.start?fmtDate(s.start):"—"],["End Date",s.end?fmtDate(s.end):"—"],["Location",s.location||"—"],["Disc",s.disc||"—"],["Work Type",wt],["PO #",s.po||(b.key==="755"?"EWS-PO-":"EWSO-PO-")],["PO Request #",s.poReq||(isInv?"—":num)]];
+  var poTmpl=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000"), poReal=(s.po&&String(s.po).trim()!==poTmpl)?String(s.po).trim():"";
+  var meta=[["Date",fmtDate(s.date)],["Start Date",s.start?fmtDate(s.start):"—"],["End Date",s.end?fmtDate(s.end):"—"],["Location",s.location||"—"],["Disc",s.disc||"—"],["Work Type",wt],["PO #",isInv?(poReal||(b.key==="755"?"EWS-PO-":"EWSO-PO-")):(poReal||"—")],["PO Request #",s.poReq||(isInv?"—":num)]];
   if(isInv){ meta.push(["Terms",s.terms||"Net 60"]); meta.push(["Contact",s.contact||"—"]); }
   var rows=lines.map(function(l,i){return '<tr><td class="gut">'+(i+1)+'</td><td>'+esc(l.name)+(l.techs>1?' <span style="color:#1a7a3e">(×'+l.techs+' techs)</span>':"")+'</td><td class="c">'+l.qty+'</td><td class="c">'+esc(l.unit)+'</td><td class="r">'+money(l.rate)+'</td><td class="r">'+money(l.total)+'</td></tr>';}).join("")
     ||'<tr><td class="gut"></td><td colspan="5" style="color:#aaa;padding:12px 8px">Add line items to populate the document…</td></tr>';
@@ -869,23 +882,26 @@ function renderDoc(v){ var el=document.getElementById("doc-"+v); if(el) el.inner
 
 /* ---- actions ---- */
 function startNew(v,mode){ state[v].mode=mode; switchView(v); renderBuilder(v); toast("New "+(mode==="PO REQUEST"?"PO Request":"Invoice")+" · "+B[v].title); }
-function generate(v){
+async function generate(v){
   var b=B[v], s=state[v], isInv=s.mode==="INVOICE", lines=docLines(v);
   if(!lines.length){ toast("Add at least one line item first","warn"); return; }
-  if(isInv&&!s.po){ toast("Enter the Customer PO # before invoicing","warn"); return; }
+  var poTmpl=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000");
+  if(isInv && (!s.po || String(s.po).trim()===poTmpl)){ toast("Enter the Customer PO # before invoicing (still on the "+poTmpl+" placeholder)","warn"); return; }
   if(isInv){ if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50"); } else { if(!s.poReq) s.poReq=nextPoReq(); }
   var num=isInv?s.inv:s.poReq;
   var recd=collect(v);
   RECORDS[s.poReq||num]={ header:recd, lines:s.lines.slice() };   // remember line items (this session)
   saveRec([s.poReq,s.inv,num], recd);                             // remember the FULL record across sessions (this browser)
   renderBuilder(v);
-  if(CONFIG.EXEC_URL){
-    postToSheet({action:isInv?"invoice":"po",payload:recd}).then(function(res){
-      if(res&&res.error){ toast("Saved on this device, but the sheet reported: "+res.error,"warn"); }
-      else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"); loadData(); }
-    }).catch(function(){ toast("Saved on this device — couldn’t reach the web app to write the sheet","warn"); });
-  } else { toast((isInv?"Invoice ":"PO Request ")+num+" generated  ·  demo (not written to sheet)"); }
+  if(!CONFIG.EXEC_URL){ toast((isInv?"Invoice ":"PO Request ")+num+" generated  ·  demo (not written to sheet)"); return; }
+  toast("Saving "+(isInv?"Invoice ":"PO Request ")+num+"…");
+  try{ var blob=await docPdfBlob(v); if(blob) recd.pdfB64=await blobToB64(blob); }catch(e){}   // attach the exact PDF for the Drive save
+  postToSheet({action:isInv?"invoice":"po",payload:recd}).then(function(res){
+    if(res&&res.error){ toast("Saved on this device, but the sheet reported: "+res.error,"warn"); }
+    else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"+(recd.pdfB64?" + PDF filed in Drive":"")); loadData(); }
+  }).catch(function(){ toast("Saved on this device — couldn’t reach the web app to write the sheet","warn"); });
 }
+function blobToB64(blob){ return new Promise(function(res){ var fr=new FileReader(); fr.onload=function(){ res(String(fr.result).split(",")[1]||""); }; fr.onerror=function(){res("");}; fr.readAsDataURL(blob); }); }
 function collect(v){ var b=B[v],s=state[v],c=contactByName(s.contact)||{}; return {unit:b.key,billTo:CONFIG.BILLTO[b.key].name,fleet:s.fleet,operator:s.operator,location:s.location,disc:s.disc,workType:workType(s),contact:s.contact,contactInfo:s.contactInfo,contactName:s.contact,contactEmail:c.email||"",contactPhone:c.phone||"",start:s.start,end:s.end,date:s.date,poReq:s.poReq,po:s.po,inv:s.inv,mode:s.mode,notes:s.notes,rawLines:s.lines,lines:docLines(v),total:docLines(v).reduce(function(a,l){return a+l.total;},0)}; }
 async function postToSheet(body){ return fetch(CONFIG.EXEC_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)}).then(function(r){return r.json();}); }
 
@@ -986,7 +1002,7 @@ async function emailDraft(v){
 function openGmail(to,cc,su,body){ var au=AUTH_EMAIL?("&authuser="+encodeURIComponent(AUTH_EMAIL)):""; window.open("https://mail.google.com/mail/?view=cm&fs=1"+au+"&to="+encodeURIComponent(to)+"&cc="+encodeURIComponent(cc.join(","))+"&su="+encodeURIComponent(su)+"&body="+encodeURIComponent(body),"_blank"); }
 
 /* Feature 3: reminder email for a tracked row */
-function reminder(id){
+async function reminder(id){
   var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
   var rec=contactForRow(x)||{email:""}; var to=rec.email, cc=COMMON_CC.filter(function(e){return e.toLowerCase()!==(to||"").toLowerCase();});
   var unit=x.unit==="755"?"Equipment Service (755)":"Operations (765)";
@@ -994,11 +1010,22 @@ function reminder(id){
   var ask = needsSig(x) ? "please review and SIGN AND RETURN the attached invoice" : "please assign a PO to the attached invoice";
   var body="Following up on the invoice below — "+ask+".\n\nBilling Unit : "+(x.unit==="755"?"Evolution Well Services - 755":"Evolution Well Services Operating LLC - 765")
     +"\n\nInvoice #: "+x.inv+"\n"+x.operator+" - "+x.location+" - Fleet # "+x.fleet+"\nAmount: "+money(x.amount)+"\nInvoice date: "+fmtDate(x.date)+" ("+x.age+" days)\n\nPlease let me know if you have any questions.";
-  openGmail(to,cc,subj,body);
+  var attached=false;
+  if(CONFIG.GOOGLE_CLIENT_ID && x.pdfUrl){                         // attach the saved invoice PDF from Drive when available
+    try{ toast("Attaching the saved PDF from Drive…"); var blob=await fetchDrivePdf(x.pdfUrl); if(blob){ await gmailCreateDraft(to,cc,subj,body,blob,"Invoice_"+(x.inv||x.poReq)+".pdf"); attached=true; } }catch(e){}
+  }
+  if(!attached) openGmail(to,cc,subj,body);
   x.reminderSent="Yes";
   if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:x.inv,poReq:x.poReq,field:"reminder",value:"Yes"}}).catch(function(){});
   renderDash(); renderTracker();
-  toast("Reminder draft opened for #"+x.inv+" (Fleet #"+x.fleet+")");
+  toast(attached ? "Reminder draft created in Gmail with the invoice PDF attached — open Gmail → Drafts" : "Reminder draft opened for #"+x.inv+" (Fleet #"+x.fleet+")");
+}
+async function fetchDrivePdf(pdfUrl){
+  var m=String(pdfUrl||"").match(/[-\w]{25,}/); if(!m) return null;   // extract the Drive file id from the saved URL
+  var token=GAPI.token||await gmailToken();
+  var r=await fetch("https://www.googleapis.com/drive/v3/files/"+m[0]+"?alt=media",{headers:{Authorization:"Bearer "+token}});
+  if(!r.ok) throw new Error("drive "+r.status);
+  return await r.blob();
 }
 
 /* ============================ TRACKER EDITOR ============================ */
@@ -1088,7 +1115,7 @@ function signOut(){ try{ localStorage.removeItem("revo-auth"); localStorage.remo
 /* Gmail API: obtain a compose token on demand, then create a draft with the PDF attached. */
 function gmailToken(){ return new Promise(function(res,rej){
   if(!(window.google&&google.accounts&&google.accounts.oauth2)){ rej("gis"); return; }
-  var tc=google.accounts.oauth2.initTokenClient({ client_id:CONFIG.GOOGLE_CLIENT_ID, scope:"https://www.googleapis.com/auth/gmail.compose", hint:AUTH_EMAIL||undefined, hd:CONFIG.ALLOWED_DOMAIN||undefined, callback:function(t){ if(t&&t.access_token){ GAPI.token=t.access_token; res(t.access_token); } else rej("token"); } });
+  var tc=google.accounts.oauth2.initTokenClient({ client_id:CONFIG.GOOGLE_CLIENT_ID, scope:"https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/drive.readonly", hint:AUTH_EMAIL||undefined, hd:CONFIG.ALLOWED_DOMAIN||undefined, callback:function(t){ if(t&&t.access_token){ GAPI.token=t.access_token; res(t.access_token); } else rej("token"); } });
   tc.requestAccessToken({prompt:""});
 }); }
 async function gmailCreateDraft(to,cc,subject,body,pdfBlob,fname){
