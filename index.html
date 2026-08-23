@@ -391,7 +391,7 @@ const CONFIG = {
   EXEC_URL: "https://script.google.com/macros/s/AKfycbxsF1tv_QxGWMUxpaZJiKsGRRMSj5Zlb05bLml6QRglE6T5X9Uq5Q22mjYnpdxbc3Ql/exec",   // deployed Apps Script Web App /exec URL → live mode
   GOOGLE_CLIENT_ID: "",             // set to enable Google Sign-In (restricted to the domain below) + Gmail attach
   ALLOWED_DOMAIN: "revolution-es.com",
-  COMPANY: { name:"Revolution Energy Services, Inc.", division:"Maintenance and Repair Division",
+  COMPANY: { name:"Revolution Energy Services, Inc.", division:"Asset Management Division",
              addr:"728 Henderson Avenue", city:"Washington, PA 15301", tel:"724.888.3200",
              ar:"Accounts Receivable · 724-888-3200", email:"Accountsreceivable@revolution-es.com" },
   BILLTO: {
@@ -637,12 +637,12 @@ function toggleDesk(id){ deskOpen[id]=!deskOpen[id]; renderDesk(); }
 /* ============================ BUILDERS ============================ */
 var B={ eq:{key:"755",view:"eq",title:"Equipment Service"}, ops:{key:"765",view:"ops",title:"Operations"} };
 var state={
-  eq:{ mode:"PO REQUEST", fleet:"6", operator:"CNX", location:"", disc:"", contact:"Brandon Dock", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 30", notes:"", lines:[] },
-  ops:{ mode:"PO REQUEST", fleet:"13", operator:"EQT", location:"", disc:"", contact:"Ryan Poorman", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 30", notes:"", lines:[] }
+  eq:{ mode:"PO REQUEST", fleet:"6", operator:"CNX", location:"", disc:"", contact:"Brandon Dock", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 60", notes:"", lines:[] },
+  ops:{ mode:"PO REQUEST", fleet:"13", operator:"EQT", location:"", disc:"", contact:"Ryan Poorman", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 60", notes:"", lines:[] }
 };
 function iso(d){ return d.toISOString().slice(0,10); }
-function nextPoReq(){ var m=0; DATA.rows.forEach(function(r){var g=(""+r.poReq).match(/(\d+)\s*$/); if(g){var n=+g[1]; if(n>m)m=n;}}); return "EWS-POR-"+String(m+1).padStart(5,"0"); }
-function nextInv(series){ var m=0; DATA.rows.forEach(function(r){var s=(""+r.inv).trim(); if(s.indexOf(series)===0){var n=+s; if(n>m)m=n;}}); return m>0?String(m+1):series+"000"; }
+function nextPoReq(){ var m=0; DATA.rows.forEach(function(r){var g=(""+r.poReq).match(/(\d+)\s*$/); if(g){var n=+g[1]; if(n>m)m=n;}}); return "EWS-POR-"+String(m+1).padStart(6,"0"); }
+function nextInv(series){ var m=0; DATA.rows.forEach(function(r){var s=(""+r.inv).trim(); if(s.indexOf(series)===0){var n=+s; if(n>m)m=n;}}); return m>0?String(m+1):series+"0000"; }
 function workType(s){ return [s.operator,s.location,s.disc].filter(Boolean).join(" – "); }
 
 function renderBuilder(v){
@@ -664,9 +664,9 @@ function renderBuilder(v){
     +'<div class="f"><label>Start Date</label><input type="date" value="'+esc(s.start)+'" oninput="upd(\''+v+'\',\'start\',this.value)"></div>'
     +'<div class="f"><label>End Date</label><input type="date" value="'+esc(s.end)+'" oninput="upd(\''+v+'\',\'end\',this.value)"></div></div></div>'
     +'<div class="form-sec"><h4>Document Numbers <span class="rule"></span></h4><div class="fgrid">'
-    +'<div class="f"><label>PO Request #</label><input type="text" value="'+esc(s.poReq)+'" oninput="upd(\''+v+'\',\'poReq\',this.value)" placeholder="auto on generate"></div>'
-    +'<div class="f"><label>Customer PO #</label><input type="text" value="'+esc(s.po)+'" oninput="upd(\''+v+'\',\'po\',this.value)" placeholder="EWSO-PO-…"></div>'
-    +'<div class="f"><label>Invoice #</label><input type="text" value="'+esc(s.inv)+'" oninput="upd(\''+v+'\',\'inv\',this.value)" placeholder="auto on generate"></div>'
+    +'<div class="f"><label>PO Request #</label><div style="display:flex;gap:6px;align-items:stretch"><input style="flex:1;min-width:0" type="text" value="'+esc(s.poReq)+'" oninput="upd(\''+v+'\',\'poReq\',this.value)" placeholder="EWS-POR-000024"><button class="btn sm" type="button" onclick="pullFromPoReq(\''+v+'\')" title="Type a PO Request # then Pull to auto-fill the invoice">Pull ▸</button></div></div>'
+    +'<div class="f"><label>Customer PO #</label><input type="text" value="'+esc(s.po)+'" oninput="upd(\''+v+'\',\'po\',this.value)" placeholder="'+(b.key==="755"?"EWS-PO-3687":"EWSO-PO-1458")+'"></div>'
+    +'<div class="f"><label>Invoice #</label><input type="text" value="'+esc(s.inv)+'" oninput="upd(\''+v+'\',\'inv\',this.value)" placeholder="'+(b.key==="755"?"e.g. 510078":"e.g. 500494")+'"></div>'
     +'<div class="f"><label>Doc Date</label><input type="date" value="'+esc(s.date)+'" oninput="upd(\''+v+'\',\'date\',this.value)"></div></div></div>'
     +'<div class="form-sec"><h4>Line Items — Billing Schedule '+b.key+' <span class="rule"></span></h4>'
     +'<table class="li-table"><colgroup><col class="c-item"><col class="c-qty">'+(b.key==="765"?'<col class="c-tech">':'')+'<col class="c-unit"><col class="c-rate"><col class="c-tot"><col class="c-del"></colgroup>'
@@ -728,20 +728,20 @@ function buildDoc(v){
   var num=isInv?(s.inv||nextInv(b.key==="755"?"51":"50")):(s.poReq||nextPoReq());
   var invNo=s.inv||nextInv(b.key==="755"?"51":"50");
   var wt=workType(s)||"—";
-  var meta=[["Date",fmtDate(s.date)],["Location",s.location||"—"],["Disc",s.disc||"—"],["Work Type",wt],["PO #",s.po||"EWS-PO-"],["PO Request #",s.poReq||num]];
-  if(isInv){ meta.push(["Terms",s.terms||"Net 30"]); meta.push(["Contact",s.contact||"—"]); }
+  var meta=[["Date",fmtDate(s.date)],["Start Date",s.start?fmtDate(s.start):"—"],["End Date",s.end?fmtDate(s.end):"—"],["Location",s.location||"—"],["Disc",s.disc||"—"],["Work Type",wt],["PO #",s.po||(b.key==="755"?"EWS-PO-":"EWSO-PO-")],["PO Request #",s.poReq||(isInv?"—":num)]];
+  if(isInv){ meta.push(["Terms",s.terms||"Net 60"]); meta.push(["Contact",s.contact||"—"]); }
   var rows=lines.map(function(l,i){return '<tr><td class="gut">'+(i+1)+'</td><td>'+esc(l.name)+(l.techs>1?' <span style="color:#1a7a3e">(×'+l.techs+' techs)</span>':"")+'</td><td class="c">'+l.qty+'</td><td class="c">'+esc(l.unit)+'</td><td class="r">'+money(l.rate)+'</td><td class="r">'+money(l.total)+'</td></tr>';}).join("")
     ||'<tr><td class="gut"></td><td colspan="5" style="color:#aaa;padding:12px 8px">Add line items to populate the document…</td></tr>';
   var secLabel=(b.key==="755"?"FLAT RATE — EQUIPMENT SERVICE":"FLAT RATE — RIG UP / RIG DOWN");
-  return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c">'+esc(c.division)+'<br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
-    +'<div class="doc-title"><div class="dt">'+(isInv?"INVOICE":"PO REQUEST")+'</div><div class="dn">INVOICE #: EWS - <b>'+esc(invNo)+'</b></div></div></div>'
+  return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c"><b>'+esc(c.division)+'</b><br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
+    +'<div class="doc-title"><div class="dt">'+(isInv?"INVOICE":"PO REQUEST")+'</div><div class="dn">'+(isInv?"INVOICE #":"PO REQUEST #")+': <b>'+esc(isInv?invNo:(s.poReq||num))+'</b></div></div></div>'
     +'<div class="doc-rule"></div><div class="doc-meta"><div class="doc-billto"><div class="l">Bill To</div><div class="n">'+esc(bt.name)+'</div><div class="a">'+esc(bt.a1)+' · '+esc(bt.a2)+' · '+esc(bt.a3)+'</div></div>'
     +meta.map(function(m){return '<div class="m"><span class="l">'+esc(m[0])+'</span><span class="v">'+esc(m[1])+'</span></div>';}).join("")+'</div>'
     +'<div class="doc-secbar">'+secLabel+'</div><table class="doc-tbl"><thead><tr><th class="gut"></th><th>Description</th><th class="c">Qty</th><th class="c">Unit</th><th class="r">Per Unit</th><th class="r">Amount</th></tr></thead><tbody>'+rows+'</tbody></table>'
     +'<div class="doc-tot"><div class="box"><div class="row"><span class="l">Subtotal</span><span class="v">'+money(sub)+'</span></div><div class="row grand"><span class="l">'+(isInv?"TOTAL DUE":"TOTAL")+'</span><span class="v">'+money(sub)+'</span></div></div></div>'
     +(s.notes?'<div class="doc-notes"><div class="h">Notes</div><div class="b">'+esc(s.notes)+'</div></div>':"")
     +'<div class="doc-foot"><div class="doc-noa"><div class="h">Notice of Assignment</div>'+esc(CONFIG.NOA.note)+'<br><b>'+esc(CONFIG.NOA.name)+'</b> · '+esc(CONFIG.NOA.l1)+' · '+esc(CONFIG.NOA.l2)+'</div><div class="doc-thanks">THANK YOU FOR<br>YOUR BUSINESS</div></div>'
-    +'<div class="doc-footbar"><span>'+esc(c.name)+' · '+esc(c.division)+' · '+esc(c.addr)+', '+esc(c.city)+'</span><span class="r">'+esc(c.ar)+'<br>'+esc(c.email)+'</span></div></div>';
+    +'<div class="doc-footbar"><span>'+esc(c.name)+' · <b>'+esc(c.division)+'</b> · '+esc(c.addr)+', '+esc(c.city)+'</span><span class="r">'+esc(c.ar)+'<br>'+esc(c.email)+'</span></div></div>';
 }
 function renderDoc(v){ var el=document.getElementById("doc-"+v); if(el) el.innerHTML=buildDoc(v); }
 
@@ -773,6 +773,31 @@ function openRecord(id){
   var f=fleetRec(s.fleet); if(f){ s.contact=f.name; } applyContact(v,s.contact);
   switchView(v); renderBuilder(v);
   toast("Loaded #"+(x.inv||x.poReq)+" into the "+B[v].title+" builder"+(rec?" with its line items":" — re-add line items"));
+}
+
+/* Invoice-from-PO-Request: type a PO Request # → pull its data into the invoice */
+function pullFromPoReq(v){
+  var s=state[v], b=B[v], q=String(s.poReq||"").trim();
+  if(!q){ toast("Type a PO Request # first (e.g. EWS-POR-000024)","warn"); return; }
+  var ql=q.toLowerCase();
+  var x=DATA.rows.find(function(r){return String(r.poReq||"").trim().toLowerCase()===ql;});
+  var rec=RECORDS[q]||RECORDS[s.poReq];
+  if(!x && !rec){ toast("No PO Request found for "+q+" — check the number","warn"); return; }
+  var h=(rec&&rec.header)||x||{};
+  if(h.operator) s.operator=h.operator;
+  if(h.location) s.location=h.location;
+  if(h.disc)     s.disc=h.disc;
+  if(h.fleet)    s.fleet=h.fleet;
+  if(h.start)    s.start=h.start;
+  if(h.end)      s.end=h.end;
+  var hadLines = rec&&rec.lines&&rec.lines.length;
+  if(hadLines) s.lines=rec.lines.slice();
+  s.mode="INVOICE";
+  if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50");
+  s.po="";                                   // Customer PO # is entered manually next
+  var f=fleetRec(s.fleet); if(f) s.contact=f.name; applyContact(v,s.contact);
+  renderBuilder(v);
+  toast("Pulled "+q+(hadLines?" with its line items":(x?" ("+money(x.amount||0)+") — re-add line items":""))+" · now enter the Customer PO #");
 }
 
 function openModal(v){ currentDocV=v; var h=buildDoc(v); document.getElementById("modalDoc").innerHTML=h; document.getElementById("printMount").innerHTML=h; document.getElementById("pdfModal").classList.add("open"); }
