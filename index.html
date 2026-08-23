@@ -410,7 +410,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 ============================================================================ */
 const CONFIG = {
   EXEC_URL: "https://script.google.com/macros/s/AKfycbxsF1tv_QxGWMUxpaZJiKsGRRMSj5Zlb05bLml6QRglE6T5X9Uq5Q22mjYnpdxbc3Ql/exec",   // deployed Apps Script Web App /exec URL → live mode
-  GOOGLE_CLIENT_ID: "",             // set to enable Google Sign-In (restricted to the domain below) + Gmail attach
+  GOOGLE_CLIENT_ID: "356147624842-1m9p45pem87hcea3tcfb1e7t5gn8e2d8.apps.googleusercontent.com",   // required Google Sign-In (restricted to the domain below) + Gmail send-from
   ALLOWED_DOMAIN: "revolution-es.com",
   COMPANY: { name:"Revolution Energy Services, Inc.", division:"Asset Management Division",
              addr:"728 Henderson Avenue", city:"Washington, PA 15301", tel:"724.888.3200",
@@ -1027,6 +1027,8 @@ function gateInit(){
   try{ var u=localStorage.getItem("revo-user"); if(u){ AUTH_EMAIL=u; setUser(u,u.split("@")[0]); } }catch(e){}
   if(CONFIG.GOOGLE_CLIENT_ID){
     document.getElementById("pwForm").style.display="none";
+    // required login: only a valid @domain Google session counts (ignore any stale admin/root auth)
+    if(!(AUTH_EMAIL && AUTH_EMAIL.toLowerCase().endsWith("@"+String(CONFIG.ALLOWED_DOMAIN||"").toLowerCase()))) authed=false;
     var render=function(){ if(!(window.google&&google.accounts&&google.accounts.id)){ setTimeout(render,300); return; }
       google.accounts.id.initialize({ client_id:CONFIG.GOOGLE_CLIENT_ID, callback:onGoogleCred, hd:CONFIG.ALLOWED_DOMAIN||undefined });
       google.accounts.id.renderButton(document.getElementById("gsiBtn"),{theme:"filled_black",size:"large",text:"signin_with",shape:"pill"}); };
@@ -1048,7 +1050,7 @@ function gateSubmit(e){ e.preventDefault();
   else { var c=document.getElementById("gateForm"); c.classList.remove("gate-shake"); void c.offsetWidth; c.classList.add("gate-shake"); document.getElementById("gateErr").textContent="Incorrect username or password."; document.getElementById("gPass").value=""; }
   return false;
 }
-function signOut(){ try{ localStorage.removeItem("revo-auth"); localStorage.removeItem("revo-user"); }catch(e){} GAPI.token=null; setUser("",""); document.getElementById("gate").classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID){ document.getElementById("gUser").value=""; document.getElementById("gPass").value=""; } }
+function signOut(){ try{ localStorage.removeItem("revo-auth"); localStorage.removeItem("revo-user"); }catch(e){} GAPI.token=null; AUTH_EMAIL=""; setUser("",""); document.getElementById("gate").classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID){ document.getElementById("gUser").value=""; document.getElementById("gPass").value=""; } }
 
 /* Gmail API: obtain a compose token on demand, then create a draft with the PDF attached. */
 function gmailToken(){ return new Promise(function(res,rej){
