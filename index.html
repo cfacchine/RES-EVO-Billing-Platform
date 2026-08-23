@@ -440,7 +440,7 @@ const EXTRA_CONTACTS = [
 ];
 function fleetRec(f){ return DIRECTORY.find(d=>d.fleet===String(f))||null; }
 function contactByName(n){ return DIRECTORY.concat(EXTRA_CONTACTS).find(c=>c.name===n)||null; }
-function contactForRow(x){ if(x&&x.fleet){ var f=fleetRec(x.fleet); if(f) return f; } if(x&&x.operator){ var op=String(x.operator).toLowerCase(); var d=DIRECTORY.find(function(e){return String(e.operator||"").toLowerCase()===op;}); if(d) return d; } return null; }
+function contactForRow(x){ if(x&&x.contactEmail) return {name:x.contactName||x.operator||"", email:x.contactEmail, phone:x.contactPhone||""}; if(x&&x.fleet){ var f=fleetRec(x.fleet); if(f) return f; } if(x&&x.operator){ var op=String(x.operator).toLowerCase(); var d=DIRECTORY.find(function(e){return String(e.operator||"").toLowerCase()===op;}); if(d) return d; } return null; }
 const COMMON_CC = ["cfacchine@revolution-es.com","fwright@revolution-es.com","gkail@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","rmcclain@revolution-es.com","accountexecutive@mcf.fund","servicerequest@beusaenergy.com","jason.jacobs@beusaenergy.com","nicholas.kelley@evolutionws.com","ben.sweeney@evolutionws.com","Dchero@beusaenergy.com","radams@beusaenergy.com"];
 /* AR / collections CC — used on 20+ day reminder drafts (to the invoice contact, CC this list) */
 const AR_CC = ["fwright@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","jason.jacobs@beusaenergy.com","servicerequest@beusaenergy.com","gkail@revolution-es.com","accountexecutive@mcf.fund","rmcclain@revolution-es.com","dchero@beusaenergy.com","cfacchine@revolution-es.com","radams@beusaenergy.com","jhutchins@revolution-es.com"];
@@ -499,7 +499,7 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate"];
 const TODAY = new Date("2026-08-22T00:00:00");
 const REMIND_DAYS = 7;   // remind on invoices still open this many days after being sent for signature
 let DATA = { rows: [] };
@@ -519,7 +519,9 @@ function toRows(arr){ return arr.map(function(r,ix){ var o={}; COLS.forEach(func
   var p=parseNotes(o.notes); o.operator=o.operator||p.operator; o.location=o.location||p.location; o.disc=o.disc||p.disc; o.fleet=o.fleet||p.fleet; o.unit=(o.unit==="755"||o.unit==="765")?o.unit:unitFromInv(o.inv);
   o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent); o.paid=yn(o.paid);
   o.po=o.po||""; o.invoiceStatus=o.invoiceStatus||""; o.lineItems=Array.isArray(o.lineItems)?o.lineItems:[];
-  o.age=Math.max(0,Math.round((TODAY-new Date(o.date+"T00:00:00"))/86400000)); o.bucket=ageBucket(o.age); return o; }); }
+  o.age=Math.max(0,Math.round((TODAY-new Date(o.date+"T00:00:00"))/86400000)); o.bucket=ageBucket(o.age);
+  o.sigAge = o.sentDate ? Math.max(0,Math.round((TODAY-new Date(o.sentDate+"T00:00:00"))/86400000)) : o.age;   // days since sent for signature
+  return o; }); }
 function isPaid(x){ return x.paid==="Yes"; }
 function needsSig(x){ return !isPaid(x) && x.signed!=="Yes"; }
 function needsPO(x){ return !isPaid(x) && x.poAssigned!=="Yes"; }
@@ -630,7 +632,7 @@ function buildInvoiceFromRow(id){
 }
 
 /* ---- Collections: AR statement PDF + 20+ day reminder drafts ---- */
-function arRows(){ return dashRows().filter(function(x){ return !isPaid(x) && x.age>=REMIND_DAYS; }).sort(function(a,b){return b.age-a.age;}); }
+function arRows(){ return dashRows().filter(function(x){ return !isPaid(x) && (x.sigAge!=null?x.sigAge:x.age)>=REMIND_DAYS; }).sort(function(a,b){return b.age-a.age;}); }
 function renderCollections(){
   var r=arRows(), card=document.getElementById("collectCard"); if(!card) return;
   card.style.display = r.length? "" : "none";
