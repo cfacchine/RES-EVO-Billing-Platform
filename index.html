@@ -552,8 +552,10 @@ async function loadLiveConfig(){
   try{ var dr=await fetch(CONFIG.EXEC_URL+"?action=directory").then(function(r){return r.json();});
     if(dr&&dr.fleets&&dr.fleets.length){ DIRECTORY.length=0; dr.fleets.forEach(function(f){DIRECTORY.push(f);}); } }catch(e){}
   try{ var ls=await fetch(CONFIG.EXEC_URL+"?action=lists").then(function(r){return r.json();});
-    if(ls&&Array.isArray(ls.operators)&&ls.operators.length) OPERATORS=ls.operators;
-    if(ls&&Array.isArray(ls.disc)&&ls.disc.length) DISC=ls.disc; }catch(e){}
+    var cl=function(a){ var o=[],seen={}; (a||[]).forEach(function(x){ var t=operClean(x), k=t.toLowerCase(); if(t&&!(k in seen)){ seen[k]=1; o.push(t); } }); return o; };
+    var ops=cl(ls&&ls.operators), dsc=cl(ls&&ls.disc);
+    if(ops.length) OPERATORS=ops;
+    if(dsc.length) DISC=dsc; }catch(e){}
 }
 function setMode(t){ document.getElementById("dataMode").textContent=t; }
 function demoOff(){ var b=document.getElementById("demoBanner"); if(b) b.style.display="none"; }
@@ -725,12 +727,13 @@ function renderUnitBars(){
   h+=buckets.map(function(b,i){return bar(b,bsum[i],bcol[b],max);}).join("");
   document.getElementById("unitBars").innerHTML=h;
 }
+function operClean(t){ t=String(t||"").trim(); return (t && !/^\(all\)$/i.test(t) && !/^operators$/i.test(t) && !/^category$/i.test(t)) ? t : ""; }
 function buildOperFilter(){
-  var seen={}, order=[];   // clean list sourced from Lists!A (OPERATORS), then any extra operators present in the data
-  OPERATORS.forEach(function(o){ var k=String(o).trim().toLowerCase(); if(k && !(k in seen)){ seen[k]=String(o).trim(); order.push(seen[k]); } });
-  DATA.rows.forEach(function(x){ var o=String(x.operator||"").trim(); var k=o.toLowerCase(); if(k && !(k in seen)){ seen[k]=o; order.push(o); } });
+  var seen={}, order=[];   // clean list sourced ONLY from Lists!A (OPERATORS) — add new operators on the Lists tab
+  OPERATORS.forEach(function(o){ var t=operClean(o), k=t.toLowerCase(); if(t && !(k in seen)){ seen[k]=t; order.push(t); } });
   var sel=document.getElementById("fOper"); var cur=sel.value;
-  sel.innerHTML='<option value="">All operators</option>'+order.map(function(o){return '<option>'+esc(o)+'</option>';}).join(""); sel.value=cur; }
+  sel.innerHTML='<option value="">All operators</option>'+order.map(function(o){return '<option>'+esc(o)+'</option>';}).join("");
+  sel.value = (order.map(function(o){return o.toLowerCase();}).indexOf(String(cur).toLowerCase())>=0) ? cur : ""; }
 
 var deskOpen={};
 function renderDesk(){
