@@ -334,12 +334,12 @@ table.data tbody tr:last-child td{border-bottom:none}
     </div>
 
     <div class="card" style="margin-bottom:16px;display:none" id="collectCard">
-      <div class="card-h"><div class="na-head"><h3>Collections</h3><span class="na-count" id="collectCount" style="background:var(--warn-bg);color:var(--warn)">0</span></div><span class="eyebrow">Outstanding · 20+ days</span></div>
+      <div class="card-h"><div class="na-head"><h3>Collections</h3><span class="na-count" id="collectCount" style="background:var(--warn-bg);color:var(--warn)">0</span></div><span class="eyebrow">Outstanding · 7+ days</span></div>
       <div class="card-b">
         <div class="sub" id="collectSummary" style="margin-bottom:12px">—</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn" onclick="downloadARStatement()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download AR Statement</button>
-          <button class="btn dark" onclick="openCollections()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Draft 20+ day reminders</button>
+          <button class="btn dark" onclick="openCollections()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Draft 7-day reminders</button>
         </div>
       </div>
     </div>
@@ -396,7 +396,7 @@ table.data tbody tr:last-child td{border-bottom:none}
   <div class="paper-frame" id="modalDoc"></div>
 </div></div>
 <div class="modal" id="collectModal"><div class="modal-inner">
-  <div class="modal-bar"><span class="mt">Collections · 20+ days outstanding</span><div style="display:flex;gap:8px">
+  <div class="modal-bar"><span class="mt">Collections · 7+ days outstanding</span><div style="display:flex;gap:8px">
     <button class="modal-close" onclick="closeCollections()">✕ Close</button></div></div>
   <div style="padding:16px;overflow:auto" id="collectBody"></div>
 </div></div>
@@ -440,6 +440,7 @@ const EXTRA_CONTACTS = [
 ];
 function fleetRec(f){ return DIRECTORY.find(d=>d.fleet===String(f))||null; }
 function contactByName(n){ return DIRECTORY.concat(EXTRA_CONTACTS).find(c=>c.name===n)||null; }
+function contactForRow(x){ if(x&&x.fleet){ var f=fleetRec(x.fleet); if(f) return f; } if(x&&x.operator){ var op=String(x.operator).toLowerCase(); var d=DIRECTORY.find(function(e){return String(e.operator||"").toLowerCase()===op;}); if(d) return d; } return null; }
 const COMMON_CC = ["cfacchine@revolution-es.com","fwright@revolution-es.com","gkail@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","rmcclain@revolution-es.com","accountexecutive@mcf.fund","servicerequest@beusaenergy.com","jason.jacobs@beusaenergy.com","nicholas.kelley@evolutionws.com","ben.sweeney@evolutionws.com","Dchero@beusaenergy.com","radams@beusaenergy.com"];
 /* AR / collections CC — used on 20+ day reminder drafts (to the invoice contact, CC this list) */
 const AR_CC = ["fwright@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","jason.jacobs@beusaenergy.com","servicerequest@beusaenergy.com","gkail@revolution-es.com","accountexecutive@mcf.fund","rmcclain@revolution-es.com","dchero@beusaenergy.com","cfacchine@revolution-es.com","radams@beusaenergy.com","jhutchins@revolution-es.com"];
@@ -498,8 +499,9 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet"];
 const TODAY = new Date("2026-08-22T00:00:00");
+const REMIND_DAYS = 7;   // remind on invoices still open this many days after being sent for signature
 let DATA = { rows: [] };
 let LIVE = false;
 let LIVE_PAID = false;   // true once the deployed backend returns a "paid" field (redeploy required)
@@ -514,7 +516,7 @@ function parseNotes(n){ n=String(n||""); var fleet=""; var fm=n.match(/Fleet\s*#
   var operator=core[0]||"", disc=core.length>1?core[core.length-1]:"", location=core.slice(1,Math.max(1,core.length-1)).join(" - ");
   return {operator:operator, location:location, disc:disc, fleet:fleet}; }
 function toRows(arr){ return arr.map(function(r,ix){ var o={}; COLS.forEach(function(c,i){o[c]=r[i];}); o.amount=Number(o.amount)||0; o.id=ix;
-  var p=parseNotes(o.notes); o.operator=p.operator; o.location=p.location; o.disc=p.disc; o.fleet=p.fleet; o.unit=(o.unit==="755"||o.unit==="765")?o.unit:unitFromInv(o.inv);
+  var p=parseNotes(o.notes); o.operator=o.operator||p.operator; o.location=o.location||p.location; o.disc=o.disc||p.disc; o.fleet=o.fleet||p.fleet; o.unit=(o.unit==="755"||o.unit==="765")?o.unit:unitFromInv(o.inv);
   o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent); o.paid=yn(o.paid);
   o.po=o.po||""; o.invoiceStatus=o.invoiceStatus||""; o.lineItems=Array.isArray(o.lineItems)?o.lineItems:[];
   o.age=Math.max(0,Math.round((TODAY-new Date(o.date+"T00:00:00"))/86400000)); o.bucket=ageBucket(o.age); return o; }); }
@@ -628,15 +630,15 @@ function buildInvoiceFromRow(id){
 }
 
 /* ---- Collections: AR statement PDF + 20+ day reminder drafts ---- */
-function arRows(){ return dashRows().filter(function(x){ return !isPaid(x) && x.age>=20; }).sort(function(a,b){return b.age-a.age;}); }
+function arRows(){ return dashRows().filter(function(x){ return !isPaid(x) && x.age>=REMIND_DAYS; }).sort(function(a,b){return b.age-a.age;}); }
 function renderCollections(){
   var r=arRows(), card=document.getElementById("collectCard"); if(!card) return;
   card.style.display = r.length? "" : "none";
   var tot=r.reduce(function(a,x){return a+x.amount;},0);
-  var contacts={}; r.forEach(function(x){ var e=((fleetRec(x.fleet)||{}).email||("fleet#"+x.fleet)).toLowerCase(); contacts[e]=1; });
+  var contacts={}; r.forEach(function(x){ var e=((contactForRow(x)||{}).email||("op:"+x.operator)).toLowerCase(); contacts[e]=1; });
   var nC=Object.keys(contacts).length;
   var cnt=document.getElementById("collectCount"); if(cnt) cnt.textContent=r.length;
-  var sum=document.getElementById("collectSummary"); if(sum) sum.innerHTML="<b>"+r.length+"</b> invoice(s) · <b>"+money(tot)+"</b> outstanding 20+ days · "+nC+" contact"+(nC===1?"":"s");
+  var sum=document.getElementById("collectSummary"); if(sum) sum.innerHTML="<b>"+r.length+"</b> invoice(s) · <b>"+money(tot)+"</b> outstanding "+REMIND_DAYS+"+ days · "+nC+" contact"+(nC===1?"":"s");
 }
 async function htmlToPdf(html, filename){
   if(typeof html2pdf==="undefined"){ document.getElementById("printMount").innerHTML=html; window.print(); return; }
@@ -661,7 +663,7 @@ function buildARStatement(){
 function downloadARStatement(){ var rows=arRows(); if(!rows.length){ toast("No invoices 20+ days outstanding in this period","warn"); return; } htmlToPdf(buildARStatement(), "AR_Statement_"+iso(TODAY)+".pdf"); }
 function collectGroups(){
   var rows=arRows(), groups={}, order=[];
-  rows.forEach(function(x){ var rec=fleetRec(x.fleet)||{}; var email=(rec.email||"").trim(); var key=email.toLowerCase()||("fleet#"+x.fleet);
+  rows.forEach(function(x){ var rec=contactForRow(x)||{}; var email=(rec.email||"").trim(); var key=email.toLowerCase()||("op:"+String(x.operator||"?").toLowerCase());
     if(!groups[key]){ groups[key]={email:email,name:rec.name||(x.operator+" · Fleet #"+x.fleet),rows:[]}; order.push(key); }
     groups[key].rows.push(x); });
   return order.map(function(k){return groups[k];});
@@ -685,7 +687,7 @@ function draftCollectionEmail(gi){
   var subj="Past-due invoices — Revolution Energy Services";
   var lines=g.rows.map(function(x){return "• Invoice "+(x.inv||x.poReq)+" — "+x.operator+" - "+x.location+" - Fleet # "+x.fleet+" — "+money(x.amount)+" — "+fmtDate(x.date)+" ("+x.age+" days)";}).join("\n");
   var tot=money(g.rows.reduce(function(a,x){return a+x.amount;},0));
-  var body="Hello "+g.name+",\n\nOur records show the following invoice(s) outstanding 20+ days. Please review and advise on payment status, or sign and return where needed.\n\n"+lines+"\n\nTotal outstanding: "+tot+"\n\nPlease let us know if you have any questions. Thank you.";
+  var body="Hello "+g.name+",\n\nThe following invoice(s) were sent for signature "+REMIND_DAYS+"+ days ago and are still open. Please sign and return, or advise on payment status.\n\n"+lines+"\n\nTotal outstanding: "+tot+"\n\nPlease let us know if you have any questions. Thank you.";
   openGmail(g.email,cc,subj,body);
   g.rows.forEach(function(x){ x.reminderSent="Yes"; if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:x.inv,poReq:x.poReq,field:"reminder",value:"Yes"}}).catch(function(){}); });
   renderDash();
@@ -961,12 +963,12 @@ async function emailDraft(v){
   }
   openGmail(to,cc,subj,body); toast("Draft opened in your Gmail — your signature is added automatically. Use “Download PDF” to attach.");
 }
-function openGmail(to,cc,su,body){ window.open("https://mail.google.com/mail/?view=cm&fs=1&to="+encodeURIComponent(to)+"&cc="+encodeURIComponent(cc.join(","))+"&su="+encodeURIComponent(su)+"&body="+encodeURIComponent(body),"_blank"); }
+function openGmail(to,cc,su,body){ var au=AUTH_EMAIL?("&authuser="+encodeURIComponent(AUTH_EMAIL)):""; window.open("https://mail.google.com/mail/?view=cm&fs=1"+au+"&to="+encodeURIComponent(to)+"&cc="+encodeURIComponent(cc.join(","))+"&su="+encodeURIComponent(su)+"&body="+encodeURIComponent(body),"_blank"); }
 
 /* Feature 3: reminder email for a tracked row */
 function reminder(id){
   var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
-  var rec=fleetRec(x.fleet)||{email:""}; var to=rec.email, cc=COMMON_CC.filter(function(e){return e.toLowerCase()!==(to||"").toLowerCase();});
+  var rec=contactForRow(x)||{email:""}; var to=rec.email, cc=COMMON_CC.filter(function(e){return e.toLowerCase()!==(to||"").toLowerCase();});
   var unit=x.unit==="755"?"Equipment Service (755)":"Operations (765)";
   var subj="REMINDER · "+x.operator+" - "+x.location+" - "+x.disc+" - "+unit+" - Fleet # "+x.fleet+" – Invoice # "+x.inv;
   var ask = needsSig(x) ? "please review and SIGN AND RETURN the attached invoice" : "please assign a PO to the attached invoice";
@@ -1014,12 +1016,13 @@ document.getElementById("pdfModal").addEventListener("click",function(e){ if(e.t
 
 /* ============================ AUTH (Google Sign-In or fallback gate) ============================ */
 var GAPI = { token:null };
+var AUTH_EMAIL = "";   // signed-in @revolution-es.com address; all email drafts are forced from this account
 function setUser(email,name){ var el=document.getElementById("whoami"); if(el) el.textContent=name||email||""; }
 function gateInit(){
   var g=document.getElementById("gate");
   document.getElementById("signoutBtn").style.display="inline-flex";
   var authed=false; try{ authed=localStorage.getItem("revo-auth")==="1"; }catch(e){}
-  try{ var u=localStorage.getItem("revo-user"); if(u) setUser(u,u.split("@")[0]); }catch(e){}
+  try{ var u=localStorage.getItem("revo-user"); if(u){ AUTH_EMAIL=u; setUser(u,u.split("@")[0]); } }catch(e){}
   if(CONFIG.GOOGLE_CLIENT_ID){
     document.getElementById("pwForm").style.display="none";
     var render=function(){ if(!(window.google&&google.accounts&&google.accounts.id)){ setTimeout(render,300); return; }
@@ -1032,6 +1035,7 @@ function gateInit(){
 function onGoogleCred(resp){
   try{ var p=JSON.parse(decodeURIComponent(atob(resp.credential.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")).split("").map(function(c){return "%"+("00"+c.charCodeAt(0).toString(16)).slice(-2);}).join("")));
     if(CONFIG.ALLOWED_DOMAIN && !(String(p.email||"").toLowerCase().endsWith("@"+CONFIG.ALLOWED_DOMAIN.toLowerCase()))){ document.getElementById("gateErr").textContent="Use your @"+CONFIG.ALLOWED_DOMAIN+" account."; return; }
+    AUTH_EMAIL=p.email||"";
     try{ localStorage.setItem("revo-auth","1"); localStorage.setItem("revo-user",p.email||""); }catch(e){}
     setUser(p.email,p.name); document.getElementById("gate").classList.add("hidden");
   }catch(e){ document.getElementById("gateErr").textContent="Sign-in failed, try again."; }
@@ -1047,7 +1051,7 @@ function signOut(){ try{ localStorage.removeItem("revo-auth"); localStorage.remo
 /* Gmail API: obtain a compose token on demand, then create a draft with the PDF attached. */
 function gmailToken(){ return new Promise(function(res,rej){
   if(!(window.google&&google.accounts&&google.accounts.oauth2)){ rej("gis"); return; }
-  var tc=google.accounts.oauth2.initTokenClient({ client_id:CONFIG.GOOGLE_CLIENT_ID, scope:"https://www.googleapis.com/auth/gmail.compose", callback:function(t){ if(t&&t.access_token){ GAPI.token=t.access_token; res(t.access_token); } else rej("token"); } });
+  var tc=google.accounts.oauth2.initTokenClient({ client_id:CONFIG.GOOGLE_CLIENT_ID, scope:"https://www.googleapis.com/auth/gmail.compose", hint:AUTH_EMAIL||undefined, hd:CONFIG.ALLOWED_DOMAIN||undefined, callback:function(t){ if(t&&t.access_token){ GAPI.token=t.access_token; res(t.access_token); } else rej("token"); } });
   tc.requestAccessToken({prompt:""});
 }); }
 async function gmailCreateDraft(to,cc,subject,body,pdfBlob,fname){
