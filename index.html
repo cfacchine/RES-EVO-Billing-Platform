@@ -311,6 +311,11 @@ table.data tbody tr:last-child td{border-bottom:none}
       <div class="card-b"><div class="na-list" id="naList"></div></div>
     </div>
 
+    <div class="card" style="margin-bottom:16px;display:none" id="readyCard">
+      <div class="card-h"><div class="na-head"><h3>PO in hand — ready to invoice</h3><span class="na-count" id="readyCount" style="background:var(--info-bg);color:var(--info)">0</span></div><span class="eyebrow">PO assigned · not yet invoiced</span></div>
+      <div class="card-b"><div class="na-list" id="readyList"></div></div>
+    </div>
+
     <div class="grid2">
       <div class="card">
         <div class="card-h"><h3>Billed by Billing Unit</h3><span class="eyebrow" id="chTotal"></span></div>
@@ -325,6 +330,17 @@ table.data tbody tr:last-child td{border-bottom:none}
           <button class="qa-btn" onclick="startNew('eq','INVOICE')"><span class="qa-ic alt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span><span class="qa-tx"><b>New Invoice · 755</b><span>Bill an approved Equipment PO</span></span></button>
           <button class="qa-btn" onclick="startNew('ops','INVOICE')"><span class="qa-ic alt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span><span class="qa-tx"><b>New Invoice · 765</b><span>Bill an approved Operations PO</span></span></button>
         </div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;display:none" id="collectCard">
+      <div class="card-h"><div class="na-head"><h3>Collections</h3><span class="na-count" id="collectCount" style="background:var(--warn-bg);color:var(--warn)">0</span></div><span class="eyebrow">Outstanding · 20+ days</span></div>
+      <div class="card-b">
+        <div class="sub" id="collectSummary" style="margin-bottom:12px">—</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn" onclick="downloadARStatement()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download AR Statement</button>
+          <button class="btn dark" onclick="openCollections()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Draft 20+ day reminders</button>
+        </div>
       </div>
     </div>
 
@@ -379,6 +395,11 @@ table.data tbody tr:last-child td{border-bottom:none}
     <button class="modal-close" onclick="closeModal()">✕ Close</button></div></div>
   <div class="paper-frame" id="modalDoc"></div>
 </div></div>
+<div class="modal" id="collectModal"><div class="modal-inner">
+  <div class="modal-bar"><span class="mt">Collections · 20+ days outstanding</span><div style="display:flex;gap:8px">
+    <button class="modal-close" onclick="closeCollections()">✕ Close</button></div></div>
+  <div style="padding:16px;overflow:auto" id="collectBody"></div>
+</div></div>
 <div class="toast-wrap" id="toasts"></div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -420,6 +441,8 @@ const EXTRA_CONTACTS = [
 function fleetRec(f){ return DIRECTORY.find(d=>d.fleet===String(f))||null; }
 function contactByName(n){ return DIRECTORY.concat(EXTRA_CONTACTS).find(c=>c.name===n)||null; }
 const COMMON_CC = ["cfacchine@revolution-es.com","fwright@revolution-es.com","gkail@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","rmcclain@revolution-es.com","accountexecutive@mcf.fund","servicerequest@beusaenergy.com","jason.jacobs@beusaenergy.com","nicholas.kelley@evolutionws.com","ben.sweeney@evolutionws.com","Dchero@beusaenergy.com","radams@beusaenergy.com"];
+/* AR / collections CC — used on 20+ day reminder drafts (to the invoice contact, CC this list) */
+const AR_CC = ["fwright@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","jason.jacobs@beusaenergy.com","servicerequest@beusaenergy.com","gkail@revolution-es.com","accountexecutive@mcf.fund","rmcclain@revolution-es.com","dchero@beusaenergy.com","cfacchine@revolution-es.com","radams@beusaenergy.com","jhutchins@revolution-es.com"];
 
 const RATES = {
   "755":[
@@ -475,7 +498,7 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit"];
 const TODAY = new Date("2026-08-22T00:00:00");
 let DATA = { rows: [] };
 let LIVE = false;
@@ -491,8 +514,9 @@ function parseNotes(n){ n=String(n||""); var fleet=""; var fm=n.match(/Fleet\s*#
   var operator=core[0]||"", disc=core.length>1?core[core.length-1]:"", location=core.slice(1,Math.max(1,core.length-1)).join(" - ");
   return {operator:operator, location:location, disc:disc, fleet:fleet}; }
 function toRows(arr){ return arr.map(function(r,ix){ var o={}; COLS.forEach(function(c,i){o[c]=r[i];}); o.amount=Number(o.amount)||0; o.id=ix;
-  var p=parseNotes(o.notes); o.operator=p.operator; o.location=p.location; o.disc=p.disc; o.fleet=p.fleet; o.unit=unitFromInv(o.inv);
+  var p=parseNotes(o.notes); o.operator=p.operator; o.location=p.location; o.disc=p.disc; o.fleet=p.fleet; o.unit=(o.unit==="755"||o.unit==="765")?o.unit:unitFromInv(o.inv);
   o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent); o.paid=yn(o.paid);
+  o.po=o.po||""; o.invoiceStatus=o.invoiceStatus||""; o.lineItems=Array.isArray(o.lineItems)?o.lineItems:[];
   o.age=Math.max(0,Math.round((TODAY-new Date(o.date+"T00:00:00"))/86400000)); o.bucket=ageBucket(o.age); return o; }); }
 function isPaid(x){ return x.paid==="Yes"; }
 function needsSig(x){ return !isPaid(x) && x.signed!=="Yes"; }
@@ -528,14 +552,15 @@ function yearOf(s){ return new Date(s+"T00:00:00").getFullYear(); }
 function monthOf(s){ return new Date(s+"T00:00:00").getMonth()+1; }
 
 /* ============================ RENDER ALL ============================ */
-function renderAll(){ buildPeriod(); buildOperFilter(); renderDash(); renderBuilder("eq"); renderBuilder("ops"); renderTracker(); }
+function hydrateRecords(){ DATA.rows.forEach(function(r){ if(r.lineItems&&r.lineItems.length){ var key=r.poReq||r.inv; if(key) RECORDS[key]={header:{operator:r.operator,location:r.location,disc:r.disc,fleet:r.fleet,po:r.po},lines:r.lineItems.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate),name:L.name};})}; } }); }
+function renderAll(){ hydrateRecords(); buildPeriod(); buildOperFilter(); renderDash(); renderBuilder("eq"); renderBuilder("ops"); renderTracker(); }
 function dashRows(){ var y=document.getElementById("pYear").value, m=document.getElementById("pMonth").value;
   return DATA.rows.filter(function(x){ if(!x.date) return !y; if(y&&String(yearOf(x.date))!==y) return false; if(m&&String(monthOf(x.date))!==m) return false; return true; }); }
 function buildPeriod(){ var yrs=[...new Set(DATA.rows.map(function(x){return x.date&&yearOf(x.date);}).filter(Boolean))].sort(function(a,b){return b-a;});
   var sel=document.getElementById("pYear"); var cur=sel.value;
   sel.innerHTML='<option value="">All years</option>'+yrs.map(function(y){return "<option>"+y+"</option>";}).join("");
   sel.value = cur || (yrs.indexOf(2026)>=0?"2026":(yrs[0]||"")); }
-function renderDash(){ renderKpis(); renderNeeds(); renderUnitBars(); renderDesk(); }
+function renderDash(){ renderKpis(); renderNeeds(); renderReady(); renderCollections(); renderUnitBars(); renderDesk(); }
 
 function renderKpis(){
   var r=dashRows(), total=r.reduce(function(a,x){return a+x.amount;},0);
@@ -574,6 +599,99 @@ function renderNeeds(){
       +'<span class="na-act"><button class="btn sm" onclick="reminder('+x.id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Reminder</button></span></div>';
   }).join("") || '<div style="color:var(--muted);font-size:13px;padding:8px 2px">Nothing needs attention in this period. 🎉</div>';
 }
+
+/* ---- Ready to invoice: PO in hand, not yet billed ---- */
+function readyRows(){ return dashRows().filter(function(x){ return x.poReq && x.poAssigned==="Yes" && !x.inv && !isPaid(x); }).sort(function(a,b){return b.age-a.age;}); }
+function renderReady(){
+  var r=readyRows(), el=document.getElementById("readyList"), card=document.getElementById("readyCard");
+  var cnt=document.getElementById("readyCount"); if(cnt) cnt.textContent=r.length;
+  if(card) card.style.display = r.length? "" : "none";
+  if(!el) return;
+  el.innerHTML = r.slice(0,8).map(function(x){
+    return '<div class="na-row"><span class="na-flag" style="background:var(--info)"></span>'
+      +'<div class="na-main"><b>'+esc(x.poReq)+' · '+esc(x.operator)+' – '+esc(x.location)+'</b>'
+      +'<div class="sub">Fleet #'+esc(x.fleet)+' · '+esc(x.disc)+(x.po?' · PO '+esc(x.po):'')+' · '+x.age+' days · '+esc(x.unit)+'</div></div>'
+      +'<span class="na-amt">'+money(x.amount)+'</span>'
+      +'<span class="na-act"><button class="btn sm" onclick="buildInvoiceFromRow('+x.id+')">Build invoice ▸</button></span></div>';
+  }).join("");
+}
+function buildInvoiceFromRow(id){
+  var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
+  var v=(x.unit==="765")?"ops":"eq", s=state[v];
+  s.fleet=x.fleet||s.fleet; s.operator=x.operator; s.location=x.location; s.disc=x.disc; s.notes="";
+  s.poReq=x.poReq||""; s.po=x.po||""; s.inv=x.inv||nextInv(B[v].key==="755"?"51":"50"); s.mode="INVOICE";
+  var rec=RECORDS[x.poReq]||RECORDS[x.inv];
+  s.lines=(rec&&rec.lines&&rec.lines.length)? rec.lines.slice() : [{idx:"",qty:1,techs:1,rate:0}];
+  var f=fleetRec(s.fleet); if(f) s.contact=f.name; applyContact(v,s.contact);
+  switchView(v); renderBuilder(v);
+  toast("Building invoice for "+x.poReq+(rec?" with its line items":"")+" — confirm the Customer PO #, then Generate");
+}
+
+/* ---- Collections: AR statement PDF + 20+ day reminder drafts ---- */
+function arRows(){ return dashRows().filter(function(x){ return !isPaid(x) && x.age>=20; }).sort(function(a,b){return b.age-a.age;}); }
+function renderCollections(){
+  var r=arRows(), card=document.getElementById("collectCard"); if(!card) return;
+  card.style.display = r.length? "" : "none";
+  var tot=r.reduce(function(a,x){return a+x.amount;},0);
+  var contacts={}; r.forEach(function(x){ var e=((fleetRec(x.fleet)||{}).email||("fleet#"+x.fleet)).toLowerCase(); contacts[e]=1; });
+  var nC=Object.keys(contacts).length;
+  var cnt=document.getElementById("collectCount"); if(cnt) cnt.textContent=r.length;
+  var sum=document.getElementById("collectSummary"); if(sum) sum.innerHTML="<b>"+r.length+"</b> invoice(s) · <b>"+money(tot)+"</b> outstanding 20+ days · "+nC+" contact"+(nC===1?"":"s");
+}
+async function htmlToPdf(html, filename){
+  if(typeof html2pdf==="undefined"){ document.getElementById("printMount").innerHTML=html; window.print(); return; }
+  var wrap=document.createElement("div"); wrap.style.cssText="position:fixed;left:-9999px;top:0;width:720px;background:#fff";
+  wrap.innerHTML=html; document.body.appendChild(wrap);
+  var el=wrap.querySelector(".doc")||wrap.firstElementChild; if(el){ el.style.boxShadow="none"; el.style.margin="0"; el.style.maxWidth="none"; }
+  var opt={margin:0,filename:filename,image:{type:"jpeg",quality:.98},html2canvas:{scale:2,backgroundColor:"#fff"},jsPDF:{unit:"in",format:"letter",orientation:"portrait"}};
+  try{ var blob=await html2pdf().set(opt).from(el).outputPdf("blob"); var u=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=u; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); toast("Downloaded "+filename); } finally { document.body.removeChild(wrap); }
+}
+function buildARStatement(){
+  var rows=arRows(), c=CONFIG.COMPANY, tot=rows.reduce(function(a,x){return a+x.amount;},0);
+  var y=document.getElementById("pYear").value||"all years";
+  var trs=rows.map(function(x,i){ return '<tr><td class="gut">'+(i+1)+'</td><td>'+fmtDate(x.date)+'</td><td>'+esc(x.inv||x.poReq||"—")+'</td><td>'+esc(x.operator)+' – '+esc(x.location)+'</td><td class="c">'+esc(x.unit)+'</td><td class="c">'+x.age+'d</td><td class="r">'+money(x.amount)+'</td></tr>'; }).join("");
+  return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c"><b>'+esc(c.division)+'</b><br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
+    +'<div class="doc-title"><div class="dt">AR STATEMENT</div><div class="dn">Outstanding 20+ days · '+esc(y)+'</div></div></div>'
+    +'<div class="doc-rule"></div>'
+    +'<div class="doc-secbar">ACCOUNTS RECEIVABLE — OUTSTANDING INVOICES</div>'
+    +'<table class="doc-tbl"><thead><tr><th class="gut"></th><th>Date</th><th>Invoice / PO Req</th><th>Operator – Location</th><th class="c">Unit</th><th class="c">Age</th><th class="r">Amount</th></tr></thead><tbody>'+trs+'</tbody></table>'
+    +'<div class="doc-tot"><div class="box"><div class="row grand"><span class="l">TOTAL OUTSTANDING</span><span class="v">'+money(tot)+'</span></div></div></div>'
+    +'<div class="doc-footbar"><span>'+esc(c.name)+' · <b>'+esc(c.division)+'</b> · '+esc(c.addr)+', '+esc(c.city)+'</span><span class="r">'+esc(c.ar)+'<br>'+esc(c.email)+'</span></div></div>';
+}
+function downloadARStatement(){ var rows=arRows(); if(!rows.length){ toast("No invoices 20+ days outstanding in this period","warn"); return; } htmlToPdf(buildARStatement(), "AR_Statement_"+iso(TODAY)+".pdf"); }
+function collectGroups(){
+  var rows=arRows(), groups={}, order=[];
+  rows.forEach(function(x){ var rec=fleetRec(x.fleet)||{}; var email=(rec.email||"").trim(); var key=email.toLowerCase()||("fleet#"+x.fleet);
+    if(!groups[key]){ groups[key]={email:email,name:rec.name||(x.operator+" · Fleet #"+x.fleet),rows:[]}; order.push(key); }
+    groups[key].rows.push(x); });
+  return order.map(function(k){return groups[k];});
+}
+function openCollections(){
+  var groups=collectGroups(); if(!groups.length){ toast("Nothing 20+ days outstanding in this period","warn"); return; }
+  window._collectGroups=groups;
+  var h=groups.map(function(g,gi){
+    var tot=g.rows.reduce(function(a,x){return a+x.amount;},0);
+    var lis=g.rows.map(function(x){return '<div class="sub" style="padding:1px 0">#'+esc(x.inv||x.poReq)+' · '+esc(x.operator)+' – '+esc(x.location)+' · '+money(x.amount)+' · '+x.age+'d</div>';}).join("");
+    return '<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px"><div><b>'+esc(g.name)+'</b> <span class="sub">· '+esc(g.email||"no email on file")+' · '+g.rows.length+' invoice(s) · '+money(tot)+'</span></div>'
+      +'<button class="btn sm" onclick="draftCollectionEmail('+gi+')" '+(g.email?'':'disabled')+'>Draft ▸</button></div>'+lis+'</div>';
+  }).join("");
+  document.getElementById("collectBody").innerHTML='<div class="sub" style="margin-bottom:10px">One email per contact — sent TO their contact info and CC the AR list. Opens in your Gmail to review and send.</div>'+h;
+  document.getElementById("collectModal").classList.add("open");
+}
+function draftCollectionEmail(gi){
+  var g=(window._collectGroups||[])[gi]; if(!g||!g.email) return;
+  var cc=AR_CC.filter(function(e){return e.toLowerCase()!==g.email.toLowerCase();});
+  var subj="Past-due invoices — Revolution Energy Services";
+  var lines=g.rows.map(function(x){return "• Invoice "+(x.inv||x.poReq)+" — "+x.operator+" - "+x.location+" - Fleet # "+x.fleet+" — "+money(x.amount)+" — "+fmtDate(x.date)+" ("+x.age+" days)";}).join("\n");
+  var tot=money(g.rows.reduce(function(a,x){return a+x.amount;},0));
+  var body="Hello "+g.name+",\n\nOur records show the following invoice(s) outstanding 20+ days. Please review and advise on payment status, or sign and return where needed.\n\n"+lines+"\n\nTotal outstanding: "+tot+"\n\nPlease let us know if you have any questions. Thank you.";
+  openGmail(g.email,cc,subj,body);
+  g.rows.forEach(function(x){ x.reminderSent="Yes"; if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:x.inv,poReq:x.poReq,field:"reminder",value:"Yes"}}).catch(function(){}); });
+  renderDash();
+  toast("Reminder draft opened for "+g.name+" ("+g.rows.length+" invoice) — CC'd the AR list");
+}
+function closeCollections(){ document.getElementById("collectModal").classList.remove("open"); }
 function renderUnitBars(){
   var r=dashRows();
   var u755=r.filter(function(x){return x.unit==="755";}).reduce(function(a,x){return a+x.amount;},0);
@@ -758,7 +876,7 @@ function generate(v){
   if(LIVE&&CONFIG.EXEC_URL){ postToSheet({action:isInv?"invoice":"po",payload:collect(v)}).then(function(){toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet");loadData();}).catch(function(){toast("Couldn’t save — check the web app","warn");}); }
   else { toast((isInv?"Invoice ":"PO Request ")+num+" generated  ·  demo (not written to sheet)"); }
 }
-function collect(v){ var b=B[v],s=state[v]; return {unit:b.key,billTo:CONFIG.BILLTO[b.key].name,fleet:s.fleet,operator:s.operator,location:s.location,disc:s.disc,workType:workType(s),contact:s.contact,contactInfo:s.contactInfo,start:s.start,end:s.end,date:s.date,poReq:s.poReq,po:s.po,inv:s.inv,mode:s.mode,notes:s.notes,lines:docLines(v),total:docLines(v).reduce(function(a,l){return a+l.total;},0)}; }
+function collect(v){ var b=B[v],s=state[v]; return {unit:b.key,billTo:CONFIG.BILLTO[b.key].name,fleet:s.fleet,operator:s.operator,location:s.location,disc:s.disc,workType:workType(s),contact:s.contact,contactInfo:s.contactInfo,start:s.start,end:s.end,date:s.date,poReq:s.poReq,po:s.po,inv:s.inv,mode:s.mode,notes:s.notes,rawLines:s.lines,lines:docLines(v),total:docLines(v).reduce(function(a,l){return a+l.total;},0)}; }
 async function postToSheet(body){ return fetch(CONFIG.EXEC_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)}).then(function(r){return r.json();}); }
 
 /* Feature 2: pull an existing record into the builder */
@@ -794,7 +912,7 @@ function pullFromPoReq(v){
   if(hadLines) s.lines=rec.lines.slice();
   s.mode="INVOICE";
   if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50");
-  s.po="";                                   // Customer PO # is entered manually next
+  if(h.po) s.po=h.po;                        // prefill Customer PO # if the PO Request already carries one
   var f=fleetRec(s.fleet); if(f) s.contact=f.name; applyContact(v,s.contact);
   renderBuilder(v);
   toast("Pulled "+q+(hadLines?" with its line items":(x?" ("+money(x.amount||0)+") — re-add line items":""))+" · now enter the Customer PO #");
