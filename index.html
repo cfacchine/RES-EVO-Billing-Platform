@@ -507,7 +507,7 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl","start","end"];
 const TODAY = new Date("2026-08-22T00:00:00");
 const REMIND_DAYS = 7;   // remind on invoices still open this many days after being sent for signature
 let DATA = { rows: [] };
@@ -633,13 +633,16 @@ function renderReady(){
 function buildInvoiceFromRow(id){
   var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
   var v=(x.unit==="765")?"ops":"eq", s=state[v];
-  s.fleet=x.fleet||s.fleet; s.operator=x.operator; s.location=x.location; s.disc=x.disc; s.notes="";
+  var mem=loadRec(x.poReq)||loadRec(x.inv);
+  s.fleet=x.fleet||s.fleet; s.operator=x.operator; s.location=x.location; s.disc=x.disc;
+  s.notes=(mem&&mem.notes)||x.notes||""; s.start=(mem&&mem.start)||x.start||""; s.end=(mem&&mem.end)||x.end||"";
   s.poReq=x.poReq||""; s.po=x.po||""; s.inv=x.inv||nextInv(B[v].key==="755"?"51":"50"); s.mode="INVOICE";
-  var rec=RECORDS[x.poReq]||RECORDS[x.inv];
-  s.lines=(rec&&rec.lines&&rec.lines.length)? rec.lines.slice() : [{idx:"",qty:1,techs:1,rate:0}];
-  var f=fleetRec(s.fleet); if(f) s.contact=f.name; applyContact(v,s.contact);
+  var rec=RECORDS[x.poReq]||RECORDS[x.inv], memLines=mem&&(mem.rawLines||mem.lines);
+  s.lines=(memLines&&memLines.length)? memLines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};}) : ((rec&&rec.lines&&rec.lines.length)? rec.lines.slice() : [{idx:"",qty:1,techs:1,rate:0}]);
+  if(mem&&mem.contact){ s.contact=mem.contact; if(mem.contactInfo)s.contactInfo=mem.contactInfo; } else { var f=fleetRec(s.fleet); if(f) s.contact=f.name; }
+  applyContact(v,s.contact); if(!s.contactInfo && mem && mem.contactInfo) s.contactInfo=mem.contactInfo;
   switchView(v); renderBuilder(v);
-  toast("Building invoice for "+x.poReq+(rec?" with its line items":"")+" — confirm the Customer PO #, then Generate");
+  toast("Building invoice for "+x.poReq+(rec||mem?" with its details":"")+" — confirm the Customer PO #, then Generate");
 }
 
 /* ---- Collections: AR statement PDF + 20+ day reminder drafts ---- */
@@ -920,14 +923,17 @@ function loadRec(k){ try{ var s=localStorage.getItem(recKey(k)); return s?JSON.p
 function openRecord(id){
   var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
   var v=x.unit==="765"?"ops":"eq", s=state[v];
+  var mem=loadRec(x.poReq)||loadRec(x.inv);
   s.fleet=x.fleet||s.fleet; s.operator=x.operator; s.location=x.location; s.disc=x.disc;
-  s.po=x.po||""; s.poReq=x.poReq||""; s.inv=x.inv||""; s.notes="";
-  var rec=RECORDS[x.poReq]||RECORDS[x.inv];
-  s.lines = rec? rec.lines.slice() : [{idx:"",qty:1,techs:1,rate:0}];
+  s.po=x.po||""; s.poReq=x.poReq||""; s.inv=x.inv||"";
+  s.notes=(mem&&mem.notes)||x.notes||""; s.start=(mem&&mem.start)||x.start||""; s.end=(mem&&mem.end)||x.end||"";
+  var rec=RECORDS[x.poReq]||RECORDS[x.inv], memLines=mem&&(mem.rawLines||mem.lines);
+  s.lines=(memLines&&memLines.length)? memLines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};}) : (rec? rec.lines.slice() : [{idx:"",qty:1,techs:1,rate:0}]);
   s.mode = x.inv? "INVOICE":"PO REQUEST";
-  var f=fleetRec(s.fleet); if(f){ s.contact=f.name; } applyContact(v,s.contact);
+  if(mem&&mem.contact){ s.contact=mem.contact; if(mem.contactInfo)s.contactInfo=mem.contactInfo; } else { var f=fleetRec(s.fleet); if(f){ s.contact=f.name; } }
+  applyContact(v,s.contact); if(!s.contactInfo && mem && mem.contactInfo) s.contactInfo=mem.contactInfo;
   switchView(v); renderBuilder(v);
-  toast("Loaded #"+(x.inv||x.poReq)+" into the "+B[v].title+" builder"+(rec?" with its line items":" — re-add line items"));
+  toast("Loaded #"+(x.inv||x.poReq)+" into the "+B[v].title+" builder"+(rec||mem?" with its details":" — re-add line items"));
 }
 
 /* Invoice-from-PO-Request: type a PO Request # → pull its data into the invoice */
