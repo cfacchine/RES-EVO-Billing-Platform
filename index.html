@@ -807,13 +807,13 @@ function renderBuilder(v){
     +'</div></div><div class="paper-frame"><div id="doc-'+v+'"></div></div></div></div>';
   document.getElementById("view-"+v).innerHTML=html;
   if(!s.lines.length) addLine(v,true);
-  if(!s.contactInfo) applyContact(v,s.contact);
+  applyContact(v,s.contact);
   renderLines(v);
 }
 function upd(v,k,val){ state[v][k]=val; if(k==='operator'||k==='location'||k==='disc'){ var el=document.getElementById('wt-'+v); if(el) el.querySelector('span:last-child').textContent=workType(state[v])||"Operator – Location – Disc"; } renderDoc(v); }
-function setFleet(v,f){ var s=state[v]; s.fleet=f; var rec=fleetRec(f); if(rec){ s.operator=rec.operator; s.contact=rec.name; } renderBuilder(v); }
+function setFleet(v,f){ var s=state[v]; s.fleet=f; var rec=fleetRec(f); if(rec){ s.operator=rec.operator; s.contact=rec.name; s.contactInfo=[rec.phone,rec.email].filter(Boolean).join("  ·  "); } renderBuilder(v); }
 function setContact(v,name){ applyContact(v,name); renderDoc(v); }
-function applyContact(v,name){ var s=state[v]; s.contact=name; var c=contactByName(name); s.contactInfo=c?[c.phone,c.email].filter(Boolean).join("  ·  "):""; var el=document.getElementById('ci-'+v); if(el) el.textContent=s.contactInfo||"—"; }
+function applyContact(v,name){ var s=state[v]; s.contact=name; var c=contactByName(name); if(c) s.contactInfo=[c.phone,c.email].filter(Boolean).join("  ·  "); var el=document.getElementById('ci-'+v); if(el) el.textContent=s.contactInfo||"—"; }
 function setMode2(v,m){ state[v].mode=m; renderBuilder(v); }
 function addLine(v,silent){ state[v].lines.push({idx:"",qty:1,techs:1,rate:0}); if(!silent) renderLines(v); }
 function delLine(v,i){ state[v].lines.splice(i,1); if(!state[v].lines.length) addLine(v,true); renderLines(v); }
@@ -875,13 +875,24 @@ function generate(v){
   if(isInv&&!s.po){ toast("Enter the Customer PO # before invoicing","warn"); return; }
   if(isInv){ if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50"); } else { if(!s.poReq) s.poReq=nextPoReq(); }
   var num=isInv?s.inv:s.poReq;
-  RECORDS[s.poReq||num]={ header:collect(v), lines:s.lines.slice() };   // Feature 2: remember line items
+  var recd=collect(v);
+  RECORDS[s.poReq||num]={ header:recd, lines:s.lines.slice() };   // remember line items (this session)
+  saveRec([s.poReq,s.inv,num], recd);                             // remember the FULL record across sessions (this browser)
   renderBuilder(v);
-  if(LIVE&&CONFIG.EXEC_URL){ postToSheet({action:isInv?"invoice":"po",payload:collect(v)}).then(function(){toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet");loadData();}).catch(function(){toast("Couldn’t save — check the web app","warn");}); }
-  else { toast((isInv?"Invoice ":"PO Request ")+num+" generated  ·  demo (not written to sheet)"); }
+  if(CONFIG.EXEC_URL){
+    postToSheet({action:isInv?"invoice":"po",payload:recd}).then(function(res){
+      if(res&&res.error){ toast("Saved on this device, but the sheet reported: "+res.error,"warn"); }
+      else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"); loadData(); }
+    }).catch(function(){ toast("Saved on this device — couldn’t reach the web app to write the sheet","warn"); });
+  } else { toast((isInv?"Invoice ":"PO Request ")+num+" generated  ·  demo (not written to sheet)"); }
 }
-function collect(v){ var b=B[v],s=state[v]; return {unit:b.key,billTo:CONFIG.BILLTO[b.key].name,fleet:s.fleet,operator:s.operator,location:s.location,disc:s.disc,workType:workType(s),contact:s.contact,contactInfo:s.contactInfo,start:s.start,end:s.end,date:s.date,poReq:s.poReq,po:s.po,inv:s.inv,mode:s.mode,notes:s.notes,rawLines:s.lines,lines:docLines(v),total:docLines(v).reduce(function(a,l){return a+l.total;},0)}; }
+function collect(v){ var b=B[v],s=state[v],c=contactByName(s.contact)||{}; return {unit:b.key,billTo:CONFIG.BILLTO[b.key].name,fleet:s.fleet,operator:s.operator,location:s.location,disc:s.disc,workType:workType(s),contact:s.contact,contactInfo:s.contactInfo,contactName:s.contact,contactEmail:c.email||"",contactPhone:c.phone||"",start:s.start,end:s.end,date:s.date,poReq:s.poReq,po:s.po,inv:s.inv,mode:s.mode,notes:s.notes,rawLines:s.lines,lines:docLines(v),total:docLines(v).reduce(function(a,l){return a+l.total;},0)}; }
 async function postToSheet(body){ return fetch(CONFIG.EXEC_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)}).then(function(r){return r.json();}); }
+
+/* PO Request memory — persist the full builder record so Pull can restore Start/End/Notes/Contact/Fleet + line items (this browser). */
+function recKey(k){ return "revo-rec:"+String(k||"").trim().toLowerCase(); }
+function saveRec(keys,rec){ try{ (Array.isArray(keys)?keys:[keys]).forEach(function(k){ if(k&&String(k).trim()) localStorage.setItem(recKey(k),JSON.stringify(rec)); }); }catch(e){} }
+function loadRec(k){ try{ var s=localStorage.getItem(recKey(k)); return s?JSON.parse(s):null; }catch(e){ return null; } }
 
 /* Feature 2: pull an existing record into the builder */
 function openRecord(id){
@@ -904,22 +915,29 @@ function pullFromPoReq(v){
   var ql=q.toLowerCase();
   var x=DATA.rows.find(function(r){return String(r.poReq||"").trim().toLowerCase()===ql;});
   var rec=RECORDS[q]||RECORDS[s.poReq];
-  if(!x && !rec){ toast("No PO Request found for "+q+" — check the number","warn"); return; }
-  var h=(rec&&rec.header)||x||{};
+  var mem=loadRec(q);
+  if(!x && !rec && !mem){ toast("No PO Request found for "+q+" — check the number","warn"); return; }
+  var h=mem||(rec&&rec.header)||x||{};
   if(h.operator) s.operator=h.operator;
   if(h.location) s.location=h.location;
   if(h.disc)     s.disc=h.disc;
-  if(h.fleet)    s.fleet=h.fleet;
+  if(h.fleet)    s.fleet=h.fleet; else if(x&&x.fleet) s.fleet=x.fleet;
   if(h.start)    s.start=h.start;
   if(h.end)      s.end=h.end;
-  var hadLines = rec&&rec.lines&&rec.lines.length;
-  if(hadLines) s.lines=rec.lines.slice();
+  if(h.notes)    s.notes=h.notes;
+  var memLines = mem&&(mem.rawLines||mem.lines);
+  var hadLines = (memLines&&memLines.length)||(rec&&rec.lines&&rec.lines.length);
+  if(memLines&&memLines.length) s.lines=memLines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};});
+  else if(rec&&rec.lines&&rec.lines.length) s.lines=rec.lines.slice();
   s.mode="INVOICE";
   if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50");
   if(h.po) s.po=h.po;                        // prefill Customer PO # if the PO Request already carries one
-  var f=fleetRec(s.fleet); if(f) s.contact=f.name; applyContact(v,s.contact);
+  if(mem&&mem.contact){ s.contact=mem.contact; if(mem.contactInfo) s.contactInfo=mem.contactInfo; }
+  else { var f=fleetRec(s.fleet); if(f){ s.contact=f.name; } else { var cr=contactForRow(x); if(cr){ s.contact=cr.name||s.contact; s.contactInfo=[cr.phone,cr.email].filter(Boolean).join("  ·  "); } } }
+  applyContact(v,s.contact);
+  if(!s.contactInfo && mem && mem.contactInfo) s.contactInfo=mem.contactInfo;
   renderBuilder(v);
-  toast("Pulled "+q+(hadLines?" with its line items":(x?" ("+money(x.amount||0)+") — re-add line items":""))+" · now enter the Customer PO #");
+  toast("Pulled "+q+(hadLines?" with its line items":" — re-add line items")+" · now enter the Customer PO #");
 }
 
 function openModal(v){ currentDocV=v; var h=buildDoc(v); document.getElementById("modalDoc").innerHTML=h; document.getElementById("printMount").innerHTML=h; document.getElementById("pdfModal").classList.add("open"); }
@@ -959,11 +977,11 @@ async function emailDraft(v){
   var s=state[v], rec=fleetRec(s.fleet)||{email:""};
   var to=rec.email, cc=COMMON_CC.filter(function(e){return e.toLowerCase()!==(to||"").toLowerCase();});
   var subj=emailSubject(v), body=emailBody(v); renderDoc(v);
-  if(GAPI.token){ // Feature 1: create the draft in the user's Gmail with the PDF attached
-    try{ var blob=await docPdfBlob(v); await gmailCreateDraft(to,cc,subj,body,blob,pdfName(v)); toast("Gmail draft created in your account with the PDF attached — open Gmail → Drafts"); return; }
-    catch(e){ /* fall through to compose URL */ }
+  if(CONFIG.GOOGLE_CLIENT_ID){ // create the draft in the user's Gmail with the PDF attached (asks for Gmail permission the first time)
+    try{ toast("Preparing your Gmail draft with the PDF attached…"); var blob=await docPdfBlob(v); await gmailCreateDraft(to,cc,subj,body,blob,pdfName(v)); toast("Gmail draft created in your account with the PDF attached — open Gmail → Drafts"); return; }
+    catch(e){ toast("Couldn’t create the attached draft (Gmail permission needed) — opened a compose window instead. Use “Download PDF” to attach.","warn"); }
   }
-  openGmail(to,cc,subj,body); toast("Draft opened in your Gmail — your signature is added automatically. Use “Download PDF” to attach.");
+  openGmail(to,cc,subj,body);
 }
 function openGmail(to,cc,su,body){ var au=AUTH_EMAIL?("&authuser="+encodeURIComponent(AUTH_EMAIL)):""; window.open("https://mail.google.com/mail/?view=cm&fs=1"+au+"&to="+encodeURIComponent(to)+"&cc="+encodeURIComponent(cc.join(","))+"&su="+encodeURIComponent(su)+"&body="+encodeURIComponent(body),"_blank"); }
 
@@ -995,7 +1013,7 @@ function renderTracker(){
     +'<td>'+esc(x.operator)+'</td><td>'+esc(x.location)+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
     +'<td class="r num">'+money(x.amount)+'</td>'
     +'<td>'+ynSel(x.id,"paid",x.paid)+'</td><td>'+ynSel(x.id,"signed",x.signed)+'</td><td>'+ynSel(x.id,"poAssigned",x.poAssigned)+'</td><td>'+ynSel(x.id,"reminder",x.reminderSent)+'</td>'
-    +'<td><span class="saved-flash" id="flash-'+x.id+'">✓ saved</span></td></tr>';}).join("")
+    +'<td style="white-space:nowrap"><span class="saved-flash" id="flash-'+x.id+'">✓ saved</span> <button title="Delete this entry" aria-label="Delete this entry" onclick="deleteEntry('+x.id+')" style="background:none;border:0;cursor:pointer;color:#b42318;padding:4px;vertical-align:middle;opacity:.7" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button></td></tr>';}).join("")
     ||'<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:26px">No matching rows.</td></tr>';
 }
 function editRow(id,field,val){
@@ -1005,6 +1023,21 @@ function editRow(id,field,val){
   renderDash();
   if(field==="paid"&&LIVE&&!LIVE_PAID){ toast("Paid updated on screen — redeploy the backend (new version) to save Paid to the sheet","warn"); return; }
   if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:row.inv,poReq:row.poReq,field:field,value:val}}).catch(function(){toast("Couldn’t save the change","warn");});
+}
+function deleteEntry(id){
+  var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
+  var label=(x.inv?("Invoice #"+x.inv):("PO Request "+(x.poReq||"—")))+(x.operator?(" · "+x.operator):"")+(x.location?(" - "+x.location):"");
+  if(!window.confirm("Delete this entry from the Billing Tracker?\n\n"+label+"\nAmount: "+money(x.amount)+"\n\nThis removes the row from the Google Sheet and can’t be undone.")) return;
+  try{ [x.poReq,x.inv].forEach(function(k){ if(k) localStorage.removeItem(recKey(k)); }); }catch(e){}
+  if(CONFIG.EXEC_URL){
+    postToSheet({action:"delete",payload:{inv:x.inv,poReq:x.poReq}}).then(function(res){
+      if(res&&res.ok){ toast("Deleted "+(x.inv||x.poReq||"entry")+" from the sheet"); loadData(); }
+      else if(res&&res.error){ toast("Delete failed: "+res.error,"warn"); }
+      else { toast("That entry wasn’t found in the current Billing Tracker to delete — click Refresh and try again","warn"); }
+    }).catch(function(){ toast("Couldn’t reach the web app to delete","warn"); });
+  } else {
+    DATA.rows=DATA.rows.filter(function(r){return r.id!==id;}); renderAll(); toast("Removed "+(x.inv||x.poReq||"entry")+" (demo)");
+  }
 }
 
 /* ============================ NAV / THEME / TOASTS ============================ */
