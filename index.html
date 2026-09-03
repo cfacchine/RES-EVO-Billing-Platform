@@ -208,6 +208,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 .doc-tbl thead th{background:#1a7a3e;color:#fff;font-family:"Archivo";font-weight:600;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;padding:6px 8px;text-align:left}
 .doc-tbl thead th.r{text-align:right}.doc-tbl thead th.c{text-align:center}
 .doc-tbl tbody td{padding:5px 8px;border-bottom:1px solid #ececec;font-size:10.5px;vertical-align:top}
+.doc-tbl tr.doc-cat td{background:#111;color:#fff;font-family:"Archivo";font-weight:700;font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:6px 9px;border-bottom:none}
 .doc-tbl tbody td.r{text-align:right;font-variant-numeric:tabular-nums}.doc-tbl tbody td.c{text-align:center}
 .doc-tbl tbody tr:nth-child(even){background:#fafbfa} .doc-tbl .gut{color:#9a9a9a;width:22px;text-align:center;font-size:9.5px}
 .doc-tot{display:flex;justify-content:flex-end;margin-top:2px} .doc-tot .box{width:56%;max-width:320px}
@@ -891,7 +892,7 @@ function renderLines(v){
 }
 function docLines(v){ var b=B[v]; return state[v].lines.filter(function(L){return L.idx!==""||lineTotal(v,L)>0;}).map(function(L){
   var it=L.idx!==""?RATES[b.key][+L.idx]:null, sup=isSupportingLabor(v,L.idx), techs=parseInt(L.techs)||1;
-  return { name:it?it[RIDX.name]:"—", unit:it?it[RIDX.uom]:"EA", qty:parseFloat(L.qty)||0, rate:parseFloat(L.rate)||0, techs:(b.key==="765"&&sup)?techs:0, total:lineTotal(v,L) }; }); }
+  return { name:it?it[RIDX.name]:"—", cat:it?it[RIDX.cat]:"Other Items", unit:it?it[RIDX.uom]:"EA", qty:parseFloat(L.qty)||0, rate:parseFloat(L.rate)||0, techs:(b.key==="765"&&sup)?techs:0, total:lineTotal(v,L) }; }); }
 function buildDoc(v){
   var b=B[v], s=state[v], isInv=s.mode==="INVOICE", bt=CONFIG.BILLTO[b.key], c=CONFIG.COMPANY;
   var lines=docLines(v), sub=lines.reduce(function(a,l){return a+l.total;},0);
@@ -901,14 +902,20 @@ function buildDoc(v){
   var poTmpl=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000"), poReal=(s.po&&String(s.po).trim()!==poTmpl)?String(s.po).trim():"";
   var meta=[["Date",fmtDate(s.date)],["Start Date",s.start?fmtDate(s.start):"—"],["End Date",s.end?fmtDate(s.end):"—"],["Location",s.location||"—"],["Fleet #",s.fleet||"—"],["Disc",s.disc||"—"],["Work Type",wt],["PO #",isInv?(poReal||(b.key==="755"?"EWS-PO-":"EWSO-PO-")):(poReal||"—")],["PO Request #",s.poReq||(isInv?"—":num)]];
   if(isInv){ meta.push(["Terms",s.terms||"Net 60"]); meta.push(["Contact",s.contact||"—"]); }
-  var rows=lines.map(function(l,i){return '<tr><td class="gut">'+(i+1)+'</td><td>'+esc(l.name)+(l.techs>1?' <span style="color:#1a7a3e">(×'+l.techs+' techs)</span>':"")+'</td><td class="c">'+l.qty+'</td><td class="c">'+esc(l.unit)+'</td><td class="r">'+money(l.rate)+'</td><td class="r">'+money(l.total)+'</td></tr>';}).join("")
+  // Group line items under black category headers (Logistics, Equipment Service, Supporting Labor…). A new category = a new black band.
+  var groups=[], gmap={};
+  lines.forEach(function(l){ var cat=String(l.cat||"Other Items"); if(!(cat in gmap)){ gmap[cat]=[]; groups.push(cat); } gmap[cat].push(l); });
+  var n=0;
+  var rows=groups.map(function(cat){
+    var head='<tr class="doc-cat"><td colspan="6">'+esc(cat)+'</td></tr>';
+    return head+gmap[cat].map(function(l){ n++; return '<tr><td class="gut">'+n+'</td><td>'+esc(l.name)+(l.techs>1?' <span style="color:#1a7a3e">(×'+l.techs+' techs)</span>':"")+'</td><td class="c">'+l.qty+'</td><td class="c">'+esc(l.unit)+'</td><td class="r">'+money(l.rate)+'</td><td class="r">'+money(l.total)+'</td></tr>'; }).join("");
+  }).join("")
     ||'<tr><td class="gut"></td><td colspan="5" style="color:#aaa;padding:12px 8px">Add line items to populate the document…</td></tr>';
-  var secLabel=(b.key==="755"?"FLAT RATE — EQUIPMENT SERVICE":"FLAT RATE — RIG UP / RIG DOWN");
   return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c"><b>'+esc(c.division)+'</b><br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
     +'<div class="doc-title"><div class="dt">'+(isInv?"INVOICE":"PO REQUEST")+'</div><div class="dn">'+(isInv?"INVOICE #":"PO REQUEST #")+': <b>'+esc(isInv?invNo:(s.poReq||num))+'</b></div><div class="dn">Billing Unit: <b>'+(b.key==="755"?"Evolution Well Services (755)":"Evolution Well Services Operating, LLC (765)")+'</b></div></div></div>'
     +'<div class="doc-rule"></div><div class="doc-meta"><div class="doc-billto"><div class="l">Bill To</div><div class="n">'+esc(bt.name)+'</div><div class="a">'+esc(bt.a1)+' · '+esc(bt.a2)+' · '+esc(bt.a3)+'</div></div>'
     +meta.map(function(m){return '<div class="m"><span class="l">'+esc(m[0])+'</span><span class="v">'+esc(m[1])+'</span></div>';}).join("")+'</div>'
-    +'<div class="doc-secbar">'+secLabel+'</div><table class="doc-tbl"><thead><tr><th class="gut"></th><th>Description</th><th class="c">Qty</th><th class="c">Unit</th><th class="r">Per Unit</th><th class="r">Amount</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<table class="doc-tbl"><thead><tr><th class="gut"></th><th>Description</th><th class="c">Qty</th><th class="c">Unit</th><th class="r">Per Unit</th><th class="r">Amount</th></tr></thead><tbody>'+rows+'</tbody></table>'
     +'<div class="doc-tot"><div class="box"><div class="row"><span class="l">Subtotal</span><span class="v">'+money(sub)+'</span></div><div class="row grand"><span class="l">'+(isInv?"TOTAL DUE":"TOTAL")+'</span><span class="v">'+money(sub)+'</span></div></div></div>'
     +(s.notes?'<div class="doc-notes"><div class="h">Notes</div><div class="b">'+esc(s.notes)+'</div></div>':"")
     +'<div class="doc-foot"><div class="doc-noa"><div class="h">Notice of Assignment</div>'+esc(CONFIG.NOA.note)+'<br><b>'+esc(CONFIG.NOA.name)+'</b> · '+esc(CONFIG.NOA.l1)+' · '+esc(CONFIG.NOA.l2)+'</div><div class="doc-thanks">THANK YOU FOR<br>YOUR BUSINESS</div></div>'
