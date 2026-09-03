@@ -310,6 +310,7 @@ table.data tbody tr:last-child td{border-bottom:none}
       <div class="period">
         <div class="field"><label>Year</label><select id="pYear" onchange="renderDash()"></select></div>
         <div class="field"><label>Month</label><select id="pMonth" onchange="renderDash()"><option value="">All months</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select></div>
+        <div class="field"><label>&nbsp;</label><button class="btn" onclick="downloadCfoSummary()" title="Download a one-page CFO summary (totals, aging, invoice status) for the selected period" style="height:38px;white-space:nowrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>CFO Summary</button></div>
       </div>
     </div>
     <div class="kpis" id="kpis"></div>
@@ -338,6 +339,17 @@ table.data tbody tr:last-child td{border-bottom:none}
           <button class="qa-btn" onclick="startNew('eq','INVOICE')"><span class="qa-ic alt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span><span class="qa-tx"><b>New Invoice · 755</b><span>Bill an approved Equipment PO</span></span></button>
           <button class="qa-btn" onclick="startNew('ops','INVOICE')"><span class="qa-ic alt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span><span class="qa-tx"><b>New Invoice · 765</b><span>Bill an approved Operations PO</span></span></button>
         </div></div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-h"><h3>Billed vs Collected</h3><span class="eyebrow">Last 12 months</span></div>
+        <div class="card-b"><div id="trendBody"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Outstanding by Operator</h3><span class="eyebrow">Open AR · avg days</span></div>
+        <div class="card-b"><div id="arOpBody"></div></div>
       </div>
     </div>
 
@@ -593,7 +605,7 @@ function buildPeriod(){ var yrs=[...new Set(DATA.rows.map(function(x){return x.d
   var sel=document.getElementById("pYear"); var cur=sel.value;
   sel.innerHTML='<option value="">All years</option>'+yrs.map(function(y){return "<option>"+y+"</option>";}).join("");
   sel.value = cur || (yrs.indexOf(2026)>=0?"2026":(yrs[0]||"")); }
-function renderDash(){ renderKpis(); renderNeeds(); renderReady(); renderCollections(); renderUnitBars(); renderDesk(); }
+function renderDash(){ renderKpis(); renderNeeds(); renderReady(); renderCollections(); renderUnitBars(); renderTrend(); renderArOps(); renderDesk(); }
 
 function renderKpis(){
   var r=dashRows(), total=r.reduce(function(a,x){return a+x.amount;},0);
@@ -743,6 +755,77 @@ function renderUnitBars(){
   h+=buckets.map(function(b,i){return bar(b,bsum[i],bcol[b],max);}).join("");
   document.getElementById("unitBars").innerHTML=h;
 }
+/* ---- Improvement 1: monthly Billed vs Collected trend (last 12 months, all data) ---- */
+var MON3=["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function monthKey(d){ var dt=new Date(d); return isNaN(dt.getTime())?"":dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0"); }
+function renderTrend(){
+  var el=document.getElementById("trendBody"); if(!el) return;
+  var rows=DATA.rows.filter(function(x){return x.date&&monthKey(x.date);});
+  if(!rows.length){ el.innerHTML='<div class="sub" style="padding:8px 2px">No billing data yet.</div>'; return; }
+  var keys=rows.map(function(x){return monthKey(x.date);});
+  var min=keys.reduce(function(a,b){return a<b?a:b;}), max=keys.reduce(function(a,b){return a>b?a:b;});
+  var months=[], y=+min.slice(0,4), m=+min.slice(5,7), ey=+max.slice(0,4), em=+max.slice(5,7), guard=0;
+  while((y<ey||(y===ey&&m<=em))&&guard++<120){ months.push(y+"-"+String(m).padStart(2,"0")); m++; if(m>12){m=1;y++;} }
+  months=months.slice(-12);
+  var data=months.map(function(k){ var mr=rows.filter(function(x){return monthKey(x.date)===k;});
+    return { k:k, billed:mr.reduce(function(a,x){return a+(x.amount||0);},0), collected:mr.filter(isPaid).reduce(function(a,x){return a+(x.amount||0);},0) }; });
+  var mx=Math.max.apply(null,data.map(function(d){return d.billed;}).concat([1])), H=118;
+  var cols=data.map(function(d){ var lbl=MON3[+d.k.slice(5,7)]+" "+d.k.slice(2,4);
+    return '<div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px" title="'+lbl+' — Billed '+money(d.billed)+' · Collected '+money(d.collected)+'">'
+      +'<div style="height:'+H+'px;display:flex;align-items:flex-end;gap:3px">'
+        +'<div style="width:9px;height:'+Math.max(1,Math.round(d.billed/mx*H))+'px;background:var(--info);border-radius:2px 2px 0 0"></div>'
+        +'<div style="width:9px;height:'+Math.max(1,Math.round(d.collected/mx*H))+'px;background:var(--green);border-radius:2px 2px 0 0"></div>'
+      +'</div><div style="font-size:9px;color:var(--muted);white-space:nowrap">'+lbl+'</div></div>'; }).join("");
+  el.innerHTML='<div style="display:flex;align-items:flex-end;gap:6px;padding:4px 2px 0;overflow:hidden">'+cols+'</div>'
+    +'<div class="legend"><span><i class="dot" style="background:var(--info)"></i>Billed</span><span><i class="dot" style="background:var(--green)"></i>Collected</span></div>';
+}
+/* ---- Improvement 2: outstanding AR ranked by operator + weighted avg days outstanding ---- */
+function renderArOps(){
+  var el=document.getElementById("arOpBody"); if(!el) return;
+  var open=dashRows().filter(function(x){return !isPaid(x);});
+  if(!open.length){ el.innerHTML='<div class="sub" style="padding:8px 2px">Nothing outstanding in this period. 🎉</div>'; return; }
+  var totOpen=open.reduce(function(a,x){return a+x.amount;},0);
+  var wsum=open.reduce(function(a,x){return a+x.amount*(x.age||0);},0), avgDays=totOpen?Math.round(wsum/totOpen):0;
+  var g={}, order=[]; open.forEach(function(x){ var k=x.operator||"—"; if(!g[k]){g[k]={op:k,amt:0,cnt:0,oldest:0};order.push(k);} g[k].amt+=x.amount; g[k].cnt++; if((x.age||0)>g[k].oldest)g[k].oldest=x.age||0; });
+  var list=order.map(function(k){return g[k];}).sort(function(a,b){return b.amt-a.amt;}).slice(0,8);
+  var mx=Math.max.apply(null,list.map(function(d){return d.amt;}).concat([1]));
+  var ageCol=function(a){ if(a>90)return"var(--crit)"; if(a>60)return"#d2691e"; if(a>30)return"var(--warn)"; return"var(--green-bright)"; };
+  var rowsHtml=list.map(function(d){
+    return '<div class="barrow" title="'+esc(d.op)+' — '+money(d.amt)+' across '+d.cnt+' invoice(s), oldest '+d.oldest+' days">'
+      +'<div class="bl" style="max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(d.op)+'</div>'
+      +'<div class="bartrack"><div class="barfill" style="width:'+Math.max(2,d.amt/mx*100)+'%;background:'+ageCol(d.oldest)+'"></div></div>'
+      +'<div class="bv">'+money0(d.amt)+' <span class="sub" style="font-size:9.5px">('+d.cnt+')</span></div></div>'; }).join("");
+  el.innerHTML='<div class="sub" style="margin-bottom:10px"><b>'+money(totOpen)+'</b> open · avg <b>'+avgDays+' days</b> outstanding · '+open.length+' invoice(s)</div>'+rowsHtml;
+}
+/* ---- Improvement 3: one-click CFO monthly summary PDF (totals + aging + invoice status) ---- */
+function buildCfoSummary(){
+  var c=CONFIG.COMPANY, r=dashRows();
+  var yv=document.getElementById("pYear").value, mv=document.getElementById("pMonth").value;
+  var monthName=["","January","February","March","April","May","June","July","August","September","October","November","December"];
+  var period=(mv?monthName[+mv]+" ":"")+(yv||"All Years");
+  var billed=r.reduce(function(a,x){return a+x.amount;},0), paid=r.filter(isPaid).reduce(function(a,x){return a+x.amount;},0), open=billed-paid;
+  var buckets=["Current","1-30","31-60","61-90","90+"];
+  var bsum=buckets.map(function(b){return r.filter(function(x){return !isPaid(x)&&x.bucket===b;}).reduce(function(a,x){return a+x.amount;},0);});
+  var agingRows=buckets.map(function(b,i){return '<tr><td>'+b+(b==="Current"?"":" days")+'</td><td class="r">'+money(bsum[i])+'</td></tr>';}).join("");
+  var invRows=r.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);}).map(function(x,i){
+    var status=isPaid(x)?"Paid":(x.poAssigned==="Yes"?"PO Assigned":(x.signed==="Yes"?"Signed":"Open"));
+    return '<tr><td class="gut">'+(i+1)+'</td><td>'+fmtDate(x.date)+'</td><td>'+esc(x.inv||x.poReq||"—")+'</td><td>'+esc(x.operator)+' – '+esc(x.location)+'</td><td class="c">'+esc(x.unit)+'</td><td class="c">'+status+'</td><td class="r">'+money(x.amount)+'</td></tr>';
+  }).join("") || '<tr><td class="gut"></td><td colspan="6" style="color:#aaa;padding:12px 8px">No invoices in this period.</td></tr>';
+  return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c"><b>'+esc(c.division)+'</b><br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
+    +'<div class="doc-title"><div class="dt">MONTHLY SUMMARY</div><div class="dn">'+esc(period)+'</div><div class="dn">Prepared '+fmtDate(iso(new Date()))+'</div></div></div>'
+    +'<div class="doc-rule"></div>'
+    +'<div class="doc-meta"><div class="m"><span class="l">Total Billed</span><span class="v">'+money(billed)+'</span></div>'
+      +'<div class="m"><span class="l">Collected (Paid)</span><span class="v">'+money(paid)+'</span></div>'
+      +'<div class="m"><span class="l">Outstanding</span><span class="v">'+money(open)+'</span></div>'
+      +'<div class="m"><span class="l">Invoices</span><span class="v">'+r.length+'</span></div></div>'
+    +'<div class="doc-secbar">AGING OF OUTSTANDING RECEIVABLES</div>'
+    +'<table class="doc-tbl"><thead><tr><th>Bucket</th><th class="r">Outstanding</th></tr></thead><tbody>'+agingRows+'</tbody></table>'
+    +'<div class="doc-secbar" style="margin-top:14px">INVOICE STATUS</div>'
+    +'<table class="doc-tbl"><thead><tr><th class="gut"></th><th>Date</th><th>Invoice / PO Req</th><th>Operator – Location</th><th class="c">Unit</th><th class="c">Status</th><th class="r">Amount</th></tr></thead><tbody>'+invRows+'</tbody></table>'
+    +'<div class="doc-tot"><div class="box"><div class="row"><span class="l">Collected</span><span class="v">'+money(paid)+'</span></div><div class="row grand"><span class="l">OUTSTANDING</span><span class="v">'+money(open)+'</span></div></div></div>'
+    +'<div class="doc-footbar"><span>'+esc(c.name)+' · <b>'+esc(c.division)+'</b> · '+esc(c.addr)+', '+esc(c.city)+'</span><span class="r">'+esc(c.ar)+'<br>'+esc(c.email)+'</span></div></div>';
+}
+function downloadCfoSummary(){ var yv=document.getElementById("pYear").value||"all", mv=document.getElementById("pMonth").value; htmlToPdf(buildCfoSummary(), "CFO_Summary_"+yv+(mv?"-"+String(mv).padStart(2,"0"):"")+".pdf"); toast("Building CFO summary PDF…"); }
 function operClean(t){ t=String(t||"").trim(); return (t && !/^\(all\)$/i.test(t) && !/^operators$/i.test(t) && !/^category$/i.test(t)) ? t : ""; }
 function buildOperFilter(){
   var seen={}, order=[];   // clean list sourced ONLY from Lists!A (OPERATORS) — add new operators on the Lists tab
