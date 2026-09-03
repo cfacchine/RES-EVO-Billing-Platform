@@ -128,10 +128,11 @@ select:focus,input:focus,textarea:focus{outline:none;border-color:var(--green);b
 
 .tablewrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--line)}
 table.data{width:100%;border-collapse:collapse;font-size:12px;background:var(--card);min-width:720px}
-table.data thead th{background:var(--ink);color:#fff;font-family:"Archivo";font-weight:600;font-size:10px;letter-spacing:.05em;text-transform:uppercase;text-align:left;padding:9px 8px;white-space:nowrap;position:sticky;top:0;z-index:2}
+table.data thead th{background:var(--ink);color:#fff;font-family:"Archivo";font-weight:600;font-size:9.5px;letter-spacing:.02em;text-transform:uppercase;text-align:left;padding:8px 5px;white-space:nowrap;position:sticky;top:0;z-index:2}
 table.data thead th.r{text-align:right}
 table.data thead th:last-child{right:0;z-index:4;box-shadow:-7px 0 8px -7px rgba(0,0,0,.28)}
-table.data tbody td{padding:8px 8px;border-bottom:1px solid var(--line-2);white-space:nowrap;vertical-align:middle}
+table.data tbody td{padding:7px 5px;border-bottom:1px solid var(--line-2);white-space:nowrap;vertical-align:middle}
+table.data tbody td.clip{max-width:132px;overflow:hidden;text-overflow:ellipsis}
 table.data tbody td:last-child{position:sticky;right:0;z-index:1;background:var(--card);box-shadow:-7px 0 8px -7px rgba(0,0,0,.14)}
 table.data tbody td.r{text-align:right;font-variant-numeric:tabular-nums}
 table.data tbody tr.main{cursor:pointer} table.data tbody tr.main:hover{background:var(--card-2)}
@@ -222,7 +223,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 .doc-thanks{font-family:"Archivo";font-weight:800;font-size:15px;font-style:italic;color:#1a7a3e;text-align:right}
 .doc-footbar{border-top:2px solid #1a7a3e;margin-top:14px;padding-top:7px;display:flex;justify-content:space-between;font-size:8.5px;color:#1a7a3e;font-weight:600} .doc-footbar .r{color:#999;font-weight:500;text-align:right}
 
-.tr-sel{padding:4px 6px;font-size:11.5px;border-radius:6px} .saved-flash{color:var(--ok);font-size:10.5px;font-weight:600;opacity:0;transition:opacity .2s} .saved-flash.on{opacity:1}
+.tr-sel{padding:3px 4px;font-size:11px;border-radius:6px} .saved-flash{color:var(--ok);font-size:10.5px;font-weight:600;opacity:0;transition:opacity .2s} .saved-flash.on{opacity:1}
 
 .modal{position:fixed;inset:0;z-index:80;background:rgba(10,18,12,.62);display:none;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto} .modal.open{display:flex}
 .modal-inner{max-width:760px;width:100%}
@@ -764,7 +765,7 @@ function renderDesk(){
     var main='<tr class="main '+(op?'open':'')+'" onclick="toggleDesk('+x.id+')">'
       +'<td><span class="chev">▶</span></td><td class="mono">'+fmtDate(x.date)+'</td>'
       +'<td class="mono">'+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
-      +'<td>'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td>'+esc(x.location)+'</td><td>'+(esc(x.disc)||"—")+'</td>'
+      +'<td class="clip">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip">'+esc(x.location)+'</td><td class="clip">'+(esc(x.disc)||"—")+'</td>'
       +'<td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
       +'<td class="r num">'+money(x.amount)+'</td>'
       +'<td class="'+(x.signed==="Yes"?"yn-y":"yn-n")+'">'+x.signed+'</td>'
@@ -1078,10 +1079,10 @@ function renderTracker(){
   var ynSel=function(id,field,val){ return '<select class="tr-sel" onchange="editRow('+id+',\''+field+'\',this.value)"><option '+(val==="Yes"?"selected":"")+'>Yes</option><option '+(val!=="Yes"?"selected":"")+'>No</option></select>'; };
   document.getElementById("trackBody").innerHTML=rows.map(function(x){return '<tr class="'+(x.paid==="Yes"?"paid-row":"")+'">'
     +'<td class="mono">'+fmtDate(x.date)+'</td><td class="mono">'+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
-    +'<td>'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td>'+esc(x.location)+'</td><td>'+(esc(x.disc)||"—")+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
+    +'<td class="clip">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip">'+esc(x.location)+'</td><td class="clip">'+(esc(x.disc)||"—")+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
     +'<td class="r num">'+money(x.amount)+'</td>'
     +'<td>'+ynSel(x.id,"paid",x.paid)+'</td><td>'+ynSel(x.id,"signed",x.signed)+'</td><td>'+ynSel(x.id,"poAssigned",x.poAssigned)+'</td><td>'+ynSel(x.id,"reminder",x.reminderSent)+'</td>'
-    +'<td style="white-space:nowrap"><span class="saved-flash" id="flash-'+x.id+'">✓ saved</span> <button title="Delete this entry" aria-label="Delete this entry" onclick="deleteEntry('+x.id+')" style="background:none;border:0;cursor:pointer;color:#b42318;padding:4px;vertical-align:middle;opacity:.7" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button></td></tr>';}).join("")
+    +'<td style="white-space:nowrap"><span class="saved-flash" id="flash-'+x.id+'" title="Saved">✓</span> <button title="Delete this entry" aria-label="Delete this entry" onclick="deleteEntry('+x.id+')" style="background:none;border:0;cursor:pointer;color:#b42318;padding:4px;vertical-align:middle;opacity:.7" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button></td></tr>';}).join("")
     ||'<tr><td colspan="15" style="text-align:center;color:var(--muted);padding:26px">No matching rows.</td></tr>';
 }
 function editRow(id,field,val){
