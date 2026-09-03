@@ -284,6 +284,7 @@ table.data tbody tr:last-child td{border-bottom:none}
   <div class="appbar-title"><span class="t">EVO Billing Tracker</span><span class="s"><span class="live-dot"></span><span id="dataMode">Demo data</span></span></div>
   <div class="appbar-actions">
     <span class="who" id="whoami"></span>
+    <button class="ibtn" onclick="openAccessLog()" id="logBtn" title="Access Log — who has signed in" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 2M12 3a9 9 0 1 0 9 9"/><path d="M3 3v5h5"/></svg>Access Log</button>
     <button class="ibtn" onclick="loadData(true)" title="Reload from the sheet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.3M21 3v6h-6"/></svg>Refresh</button>
     <button class="ibtn" onclick="window.print()" title="Print"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/></svg>Print</button>
     <button class="ibtn" onclick="toggleTheme()" id="themeBtn" title="Theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>Theme</button>
@@ -419,6 +420,12 @@ table.data tbody tr:last-child td{border-bottom:none}
   <div class="modal-bar"><span class="mt">Collections · 7+ days outstanding</span><div style="display:flex;gap:8px">
     <button class="modal-close" onclick="closeCollections()">✕ Close</button></div></div>
   <div style="padding:16px;overflow:auto" id="collectBody"></div>
+</div></div>
+<div class="modal" id="logModal"><div class="modal-inner">
+  <div class="modal-bar"><span class="mt">Access Log · sign-in history</span><div style="display:flex;gap:8px">
+    <button class="modal-close" onclick="openAccessLog()" title="Reload">↻ Refresh</button>
+    <button class="modal-close" onclick="closeAccessLog()">✕ Close</button></div></div>
+  <div class="paper-frame" id="logBody" style="background:#fff"></div>
 </div></div>
 <div class="modal" id="ackModal"><div class="modal-inner" style="max-width:430px">
   <div style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.4)">
@@ -1259,7 +1266,34 @@ document.getElementById("pdfModal").addEventListener("click",function(e){ if(e.t
 /* ============================ AUTH (Google Sign-In or fallback gate) ============================ */
 var GAPI = { token:null };
 var AUTH_EMAIL = "";   // signed-in @revolution-es.com address; all email drafts are forced from this account
-function setUser(email,name){ var el=document.getElementById("whoami"); if(el) el.textContent=name||email||""; }
+var ADMINS=["cfacchine@revolution-es.com"];   // who can see the Access Log (add more @revolution-es.com admins here)
+function isAdmin(email){ email=String(email||AUTH_EMAIL||"").trim().toLowerCase(); return ADMINS.some(function(a){return a.toLowerCase()===email;}); }
+function setUser(email,name){ var el=document.getElementById("whoami"); if(el) el.textContent=name||email||"";
+  var lb=document.getElementById("logBtn"); if(lb) lb.style.display=isAdmin(email)?"":"none"; }
+/* Record a sign-in to the Access Log — once per browser session (a refresh won't spam it). */
+function recordLogin(email,name){
+  if(!email) return;
+  try{ if(sessionStorage.getItem("revo-logged")==="1") return; sessionStorage.setItem("revo-logged","1"); }catch(e){}
+  if(CONFIG.EXEC_URL){ try{ postToSheet({action:"logLogin",payload:{email:email,name:name||"",browser:navigator.userAgent||""}}).catch(function(){}); }catch(e){} }
+}
+function shortUA(ua){ ua=String(ua||"");
+  var br=/edg/i.test(ua)?"Edge":/opr|opera/i.test(ua)?"Opera":/chrome|crios/i.test(ua)?"Chrome":/firefox|fxios/i.test(ua)?"Firefox":/safari/i.test(ua)?"Safari":"Browser";
+  var os=/windows/i.test(ua)?"Windows":/mac os|macintosh/i.test(ua)?"macOS":/android/i.test(ua)?"Android":/iphone|ipad|ios/i.test(ua)?"iOS":/linux/i.test(ua)?"Linux":"";
+  return br+(os?" · "+os:""); }
+async function openAccessLog(){
+  var mo=document.getElementById("logModal"), body=document.getElementById("logBody"); if(!mo||!body) return;
+  mo.classList.add("open"); body.innerHTML='<div class="sub" style="padding:10px">Loading sign-in history…</div>';
+  if(!CONFIG.EXEC_URL){ body.innerHTML='<div class="sub" style="padding:10px">The live sheet isn’t connected, so there’s no sign-in history to show.</div>'; return; }
+  try{
+    var j=await fetch(CONFIG.EXEC_URL+"?action=logins").then(function(r){return r.json();});
+    var rows=(j&&j.logins)||[];
+    if(!rows.length){ body.innerHTML='<div class="sub" style="padding:10px">No sign-ins recorded yet. Logging begins once the updated web app is deployed — after that, every sign-in appears here.</div>'; return; }
+    var trs=rows.map(function(x){ return '<tr><td class="mono">'+esc(x.ts)+'</td><td>'+esc(x.email)+'</td><td>'+(esc(x.name)||"—")+'</td><td class="sub" style="font-size:11px">'+esc(shortUA(x.browser))+'</td></tr>'; }).join("");
+    body.innerHTML='<div class="sub" style="margin-bottom:8px">'+rows.length+' most recent sign-in'+(rows.length===1?"":"s")+' · newest first · also saved to the “Access Log” tab of your sheet</div>'
+      +'<div style="overflow:auto;max-height:62vh"><table class="data" style="width:100%"><thead><tr><th>Date / Time</th><th>Email</th><th>Name</th><th>Browser</th></tr></thead><tbody>'+trs+'</tbody></table></div>';
+  }catch(e){ body.innerHTML='<div class="sub" style="padding:10px">Couldn’t load sign-in history — make sure the updated web app has been deployed.</div>'; }
+}
+function closeAccessLog(){ var mo=document.getElementById("logModal"); if(mo) mo.classList.remove("open"); }
 function gateInit(){
   var g=document.getElementById("gate");
   document.getElementById("signoutBtn").style.display="inline-flex";
@@ -1274,14 +1308,14 @@ function gateInit(){
       google.accounts.id.renderButton(document.getElementById("gsiBtn"),{theme:"filled_black",size:"large",text:"signin_with",shape:"pill"}); };
     render();
   }
-  if(authed){ g.classList.add("hidden"); } else { g.classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID) setTimeout(function(){var u=document.getElementById("gUser"); if(u)u.focus();},60); }
+  if(authed){ g.classList.add("hidden"); if(AUTH_EMAIL) recordLogin(AUTH_EMAIL, AUTH_EMAIL.split("@")[0]); } else { g.classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID) setTimeout(function(){var u=document.getElementById("gUser"); if(u)u.focus();},60); }
 }
 function onGoogleCred(resp){
   try{ var p=JSON.parse(decodeURIComponent(atob(resp.credential.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")).split("").map(function(c){return "%"+("00"+c.charCodeAt(0).toString(16)).slice(-2);}).join("")));
     if(CONFIG.ALLOWED_DOMAIN && !(String(p.email||"").toLowerCase().endsWith("@"+CONFIG.ALLOWED_DOMAIN.toLowerCase()))){ document.getElementById("gateErr").textContent="Use your @"+CONFIG.ALLOWED_DOMAIN+" account."; return; }
     AUTH_EMAIL=p.email||"";
     try{ localStorage.setItem("revo-auth","1"); localStorage.setItem("revo-user",p.email||""); }catch(e){}
-    setUser(p.email,p.name); document.getElementById("gate").classList.add("hidden");
+    setUser(p.email,p.name); recordLogin(p.email,p.name); document.getElementById("gate").classList.add("hidden");
   }catch(e){ document.getElementById("gateErr").textContent="Sign-in failed, try again."; }
 }
 function gateSubmit(e){ e.preventDefault();
@@ -1290,7 +1324,7 @@ function gateSubmit(e){ e.preventDefault();
   else { var c=document.getElementById("gateForm"); c.classList.remove("gate-shake"); void c.offsetWidth; c.classList.add("gate-shake"); document.getElementById("gateErr").textContent="Incorrect username or password."; document.getElementById("gPass").value=""; }
   return false;
 }
-function signOut(){ try{ localStorage.removeItem("revo-auth"); localStorage.removeItem("revo-user"); }catch(e){} GAPI.token=null; AUTH_EMAIL=""; setUser("",""); document.getElementById("gate").classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID){ document.getElementById("gUser").value=""; document.getElementById("gPass").value=""; } }
+function signOut(){ try{ localStorage.removeItem("revo-auth"); localStorage.removeItem("revo-user"); sessionStorage.removeItem("revo-logged"); }catch(e){} GAPI.token=null; AUTH_EMAIL=""; setUser("",""); document.getElementById("gate").classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID){ document.getElementById("gUser").value=""; document.getElementById("gPass").value=""; } }
 
 /* Gmail API: obtain a compose token on demand, then create a draft with the PDF attached. */
 function gmailToken(){ return new Promise(function(res,rej){
