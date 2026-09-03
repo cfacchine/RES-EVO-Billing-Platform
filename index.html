@@ -765,7 +765,7 @@ function renderDesk(){
     var main='<tr class="main '+(op?'open':'')+'" onclick="toggleDesk('+x.id+')">'
       +'<td><span class="chev">▶</span></td><td class="mono">'+fmtDate(x.date)+'</td>'
       +'<td class="mono">'+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
-      +'<td class="clip">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip">'+esc(x.location)+'</td><td class="clip">'+(esc(x.disc)||"—")+'</td>'
+      +'<td class="clip" title="'+esc(x.operator)+'">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip" title="'+esc(x.location)+'">'+esc(x.location)+'</td><td class="clip" title="'+esc(x.disc)+'">'+(esc(x.disc)||"—")+'</td>'
       +'<td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
       +'<td class="r num">'+money(x.amount)+'</td>'
       +'<td class="'+(x.signed==="Yes"?"yn-y":"yn-n")+'">'+x.signed+'</td>'
@@ -798,14 +798,21 @@ var state={
   ops:{ mode:"PO REQUEST", fleet:"13", operator:"EQT", location:"", disc:"", contact:"Ryan Poorman", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 60", notes:"", lines:[] }
 };
 function iso(d){ return d.toISOString().slice(0,10); }
-function nextPoReq(){ var m=0; DATA.rows.forEach(function(r){var g=(""+r.poReq).match(/(\d+)\s*$/); if(g){var n=+g[1]; if(n>m)m=n;}}); return "EWS-POR-"+String(m+1).padStart(6,"0"); }
+var ISSUED_POREQ={};   // PO Request numbers generated/saved this session — dedupe guard (until loadData refreshes DATA)
+function poReqNum(s){ var g=(""+s).match(/(\d+)\s*$/); return g?+g[1]:0; }
+function markIssuedPoReq(n){ if(n) ISSUED_POREQ[String(n).trim().toLowerCase()]=1; }
+function poReqExists(q){ q=String(q||"").trim().toLowerCase(); if(!q) return false; if(ISSUED_POREQ[q]) return true; return DATA.rows.some(function(r){return String(r.poReq||"").trim().toLowerCase()===q;}); }
+function nextPoReq(){ var m=0;
+  DATA.rows.forEach(function(r){ var n=poReqNum(r.poReq); if(n>m)m=n; });
+  Object.keys(ISSUED_POREQ).forEach(function(k){ var n=poReqNum(k); if(n>m)m=n; });
+  return "EWS-POR-"+String(m+1).padStart(6,"0"); }
 function nextInv(series){ var m=0; DATA.rows.forEach(function(r){var s=(""+r.inv).trim(); if(s.indexOf(series)===0){var n=+s; if(n>m)m=n;}}); return m>0?String(m+1):series+"0000"; }
 function workType(s){ return [s.operator,s.location,s.disc].filter(Boolean).join(" – "); }
 
 function renderBuilder(v){
   var b=B[v], s=state[v], bt=CONFIG.BILLTO[b.key];
-  if(!s.po) s.po=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000");            // Customer PO # template prefill
-  var poReqShown = s.poReq || (s.mode==="PO REQUEST" ? nextPoReq() : ""); // show next PO Request # without locking it in
+  // Customer PO # is entered manually (no auto-fill). PO Request # always shows the next available number.
+  var poReqShown = s.poReq || nextPoReq();
   var opOpts=OPERATORS.map(function(o){return '<option value="'+esc(o)+'">';}).join("");
   var discOpts=DISC.map(function(d){return '<option value="'+esc(d)+'">';}).join("");
   var fleetOpts=DIRECTORY.map(function(d){return '<option value="'+d.fleet+'" '+(s.fleet===d.fleet?"selected":"")+'>Fleet #'+d.fleet+' · '+d.operator+'</option>';}).join("");
@@ -826,8 +833,8 @@ function renderBuilder(v){
     +'<div class="f"><label>End Date</label><input type="date" value="'+esc(s.end)+'" oninput="upd(\''+v+'\',\'end\',this.value)"></div></div></div>'
     +'<div class="form-sec"><h4>Document Numbers <span class="rule"></span></h4><div class="fgrid">'
     +'<div class="f"><label>PO Request #</label><div style="display:flex;gap:6px;align-items:stretch"><input style="flex:1;min-width:0" type="text" value="'+esc(poReqShown)+'" oninput="upd(\''+v+'\',\'poReq\',this.value)" placeholder="EWS-POR-000024"><button class="btn sm" type="button" onclick="pullFromPoReq(\''+v+'\')" title="Type a PO Request # then Pull to auto-fill the invoice">Pull ▸</button></div></div>'
-    +'<div class="f"><label>Customer PO #</label><input type="text" value="'+esc(s.po)+'" oninput="upd(\''+v+'\',\'po\',this.value)" placeholder="'+(b.key==="755"?"EWS-PO-3687":"EWSO-PO-1458")+'"></div>'
-    +'<div class="f"><label>Invoice #</label><input type="text" value="'+esc(s.inv)+'" oninput="upd(\''+v+'\',\'inv\',this.value)" placeholder="'+(b.key==="755"?"e.g. 510078":"e.g. 500494")+'"></div>'
+    +'<div class="f"><label>Customer PO #</label><div style="display:flex;gap:6px;align-items:stretch"><input style="flex:1;min-width:0" type="text" value="'+esc(s.po)+'" oninput="upd(\''+v+'\',\'po\',this.value)" placeholder="'+(b.key==="755"?"EWS-PO-3687":"EWSO-PO-1458")+'"><button class="btn sm" type="button" onclick="pullId(\''+v+'\',\'po\')" title="Pull the record that has this Customer PO #">Pull ▸</button></div></div>'
+    +'<div class="f"><label>Invoice #</label><div style="display:flex;gap:6px;align-items:stretch"><input style="flex:1;min-width:0" type="text" value="'+esc(s.inv)+'" oninput="upd(\''+v+'\',\'inv\',this.value)" placeholder="'+(b.key==="755"?"e.g. 510078":"e.g. 500494")+'"><button class="btn sm" type="button" onclick="pullId(\''+v+'\',\'inv\')" title="Pull the invoice with this number">Pull ▸</button></div></div>'
     +'<div class="f"><label>Doc Date</label><input type="date" value="'+esc(s.date)+'" oninput="upd(\''+v+'\',\'date\',this.value)"></div></div></div>'
     +'<div class="form-sec"><h4>Line Items — Billing Schedule '+b.key+' <span class="rule"></span></h4>'
     +'<table class="li-table"><colgroup><col class="c-item"><col class="c-qty">'+(b.key==="765"?'<col class="c-tech">':'')+'<col class="c-unit"><col class="c-rate"><col class="c-tot"><col class="c-del"></colgroup>'
@@ -844,6 +851,7 @@ function renderBuilder(v){
     +'<button class="btn" onclick="downloadPdf(\''+v+'\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download PDF</button>'
     +'<button class="btn dark" onclick="emailDraft(\''+v+'\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Email Draft</button>'
     +'<button class="btn" onclick="clearBuilder(\''+v+'\')" title="Clear the form to start a new document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/></svg>New / Clear</button>'
+    +'<button class="btn save" onclick="saveBuilder(\''+v+'\')" title="Save changes to this document" style="background:#0f6d33;color:#fff;border-color:#0f6d33"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Save</button>'
     +'</div></div><div class="paper-frame"><div id="doc-'+v+'"></div></div></div></div>';
   document.getElementById("view-"+v).innerHTML=html;
   if(!s.lines.length) addLine(v,true);
@@ -913,17 +921,47 @@ function startNew(v,mode){ state[v].mode=mode; switchView(v); renderBuilder(v); 
 function clearBuilder(v){
   var s=state[v], b=B[v];
   s.operator=""; s.location=""; s.disc=""; s.start=""; s.end=""; s.notes="";
-  s.poReq=""; s.inv=""; s.po=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000"); s.contact=""; s.contactInfo="";
+  s.poReq=""; s.inv=""; s.po=""; s.contact=""; s.contactInfo="";        // Customer PO # stays blank (manual entry)
   s.date=iso(new Date()); s.lines=[{idx:"",qty:1,techs:1,rate:0}];
   renderBuilder(v);
   toast("Cleared — ready for a new "+(s.mode==="PO REQUEST"?"PO Request":"Invoice"));
 }
+/* Pull an existing record into the builder by Customer PO # or Invoice # (mirrors the PO Request # Pull). */
+function pullId(v,field){
+  var s=state[v], q=String(s[field]||"").trim(), label=(field==="po"?"Customer PO #":"Invoice #");
+  if(!q){ toast("Type a "+label+" first, then Pull","warn"); return; }
+  var ql=q.toLowerCase();
+  var matches=DATA.rows.filter(function(r){return String(r[field]||"").trim().toLowerCase()===ql;});
+  if(!matches.length){ toast("No record found for "+label+" "+q,"warn"); return; }
+  matches.sort(function(a,b){return new Date(b.date)-new Date(a.date);});   // most recent match
+  openRecord(matches[0].id);
+  toast("Pulled "+label+" "+q+(matches.length>1?" ("+matches.length+" matches — loaded the most recent)":""));
+}
+/* Save the current document's changes — local record memory always, plus an upsert to the sheet when live. */
+function saveBuilder(v){
+  var b=B[v], s=state[v], isInv=s.mode==="INVOICE";
+  if(!isInv && !s.poReq) s.poReq=nextPoReq();
+  if(!isInv) markIssuedPoReq(s.poReq);
+  var num=isInv?(s.inv||s.poReq):s.poReq;
+  if(!num){ toast("Nothing to save yet — add a PO Request # or Invoice # first","warn"); return; }
+  var recd=collect(v);
+  RECORDS[s.poReq||num]={ header:recd, lines:s.lines.slice() };
+  saveRec([s.poReq,s.inv,num], recd);
+  renderBuilder(v);
+  if(!CONFIG.EXEC_URL){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved on this device."); return; }
+  toast("Saving changes to "+num+"…");
+  postToSheet({action:"save",payload:recd}).then(function(res){
+    if(res&&res.ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved to the sheet."); loadData(); }
+    else if(res&&res.error){ ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here, but the sheet reported: "+res.error+"  (Redeploy the web app to enable saving changes to the sheet.)"); }
+    else { ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here.  Redeploy the web app (new version) to save changes straight to the sheet."); }
+  }).catch(function(){ ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here — couldn't reach the web app to update the sheet."); });
+}
 async function generate(v){
   var b=B[v], s=state[v], isInv=s.mode==="INVOICE", lines=docLines(v);
   if(!lines.length){ toast("Add at least one line item first","warn"); return; }
-  var poTmpl=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000");
-  if(isInv && (!s.po || String(s.po).trim()===poTmpl)){ toast("Enter the Customer PO # before invoicing (still on the "+poTmpl+" placeholder)","warn"); return; }
-  if(isInv){ if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50"); } else { if(!s.poReq) s.poReq=nextPoReq(); }
+  if(isInv && !String(s.po||"").trim()){ toast("Enter the Customer PO # before invoicing","warn"); return; }
+  if(isInv){ if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50"); }
+  else { if(!s.poReq || poReqExists(s.poReq)) s.poReq=nextPoReq(); markIssuedPoReq(s.poReq); }   // always a unique next PO Request #
   var num=isInv?s.inv:s.poReq;
   var recd=collect(v);
   RECORDS[s.poReq||num]={ header:recd, lines:s.lines.slice() };   // remember line items (this session)
@@ -1079,7 +1117,7 @@ function renderTracker(){
   var ynSel=function(id,field,val){ return '<select class="tr-sel" onchange="editRow('+id+',\''+field+'\',this.value)"><option '+(val==="Yes"?"selected":"")+'>Yes</option><option '+(val!=="Yes"?"selected":"")+'>No</option></select>'; };
   document.getElementById("trackBody").innerHTML=rows.map(function(x){return '<tr class="'+(x.paid==="Yes"?"paid-row":"")+'">'
     +'<td class="mono">'+fmtDate(x.date)+'</td><td class="mono">'+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
-    +'<td class="clip">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip">'+esc(x.location)+'</td><td class="clip">'+(esc(x.disc)||"—")+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
+    +'<td class="clip" title="'+esc(x.operator)+'">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip" title="'+esc(x.location)+'">'+esc(x.location)+'</td><td class="clip" title="'+esc(x.disc)+'">'+(esc(x.disc)||"—")+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
     +'<td class="r num">'+money(x.amount)+'</td>'
     +'<td>'+ynSel(x.id,"paid",x.paid)+'</td><td>'+ynSel(x.id,"signed",x.signed)+'</td><td>'+ynSel(x.id,"poAssigned",x.poAssigned)+'</td><td>'+ynSel(x.id,"reminder",x.reminderSent)+'</td>'
     +'<td style="white-space:nowrap"><span class="saved-flash" id="flash-'+x.id+'" title="Saved">✓</span> <button title="Delete this entry" aria-label="Delete this entry" onclick="deleteEntry('+x.id+')" style="background:none;border:0;cursor:pointer;color:#b42318;padding:4px;vertical-align:middle;opacity:.7" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button></td></tr>';}).join("")
