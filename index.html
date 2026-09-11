@@ -1167,7 +1167,7 @@ function emailBody(v){
   var head=b.key==="755"?"EQUIPMENT SERVICE:":"OPERATIONS:";
   var total=money(docLines(v).reduce(function(a,l){return a+l.total;},0));
   var poReq=s.poReq||nextPoReq(), inv=s.inv||nextInv(b.key==="755"?"51":"50");
-  var line=(s.operator||"OPERATOR")+" - "+(s.location||"LOCATION")+" - Fleet # "+s.fleet;
+  var line=(s.operator||"OPERATOR")+" - "+(s.location||"LOCATION")+" - "+(s.disc||"DISC")+" - "+(b.key==="755"?"Equipment Service (755)":"Operations (765)")+" - Fleet # "+s.fleet;
   if(!isInv) return "Please review the attached PO request.\n\n"+head+"\nBilling Unit : "+bt.label+"\n\nPO Request #: "+poReq+"\n"+line+"\n\nTOTAL: "+total+"\n\nPlease let me know if you have any questions.";
   return "Please review the attached invoice then SIGN AND RETURN.\n\n"+head+"\nBilling Unit : "+bt.label+"\n\nPO #: "+(s.po||"")+"\nPO Request #: "+poReq+"\nINVOICE #: "+inv+"\n"+line+"\n\nTOTAL: "+total+"\n\nPlease let me know if you have any questions.";
 }
