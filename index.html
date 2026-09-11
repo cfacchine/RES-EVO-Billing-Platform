@@ -203,6 +203,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 .doc-meta .m{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;border-bottom:1px dotted #d9d9d9;padding:3px 0}
 .doc-meta .m .l{color:#666;font-weight:600;text-transform:uppercase;font-size:9px;letter-spacing:.04em;padding-top:1px}
 .doc-meta .m .v{color:#111;font-weight:600;text-align:right}
+.doc-meta .m.full{grid-column:1/-1}
 .doc-secbar{background:#111;color:#fff;font-family:"Archivo";font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:7px 11px;border-radius:2px 2px 0 0}
 .doc-tbl{width:100%;border-collapse:collapse}
 .doc-tbl thead th{background:#1a7a3e;color:#fff;font-family:"Archivo";font-weight:600;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;padding:6px 8px;text-align:left}
@@ -997,7 +998,7 @@ function buildDoc(v){
   var invNo=s.inv||nextInv(b.key==="755"?"51":"50");
   var wt=workType(s)||"—";
   var poTmpl=(b.key==="765"?"EWSO-PO-0000":"EWS-PO-0000"), poReal=(s.po&&String(s.po).trim()!==poTmpl)?String(s.po).trim():"";
-  var meta=[["Date",fmtDate(s.date)],["Start Date",s.start?fmtDate(s.start):"—"],["End Date",s.end?fmtDate(s.end):"—"],["Location",s.location||"—"],["Fleet #",s.fleet||"—"],["Disc",s.disc||"—"],["Work Type",wt],["PO #",isInv?(poReal||(b.key==="755"?"EWS-PO-":"EWSO-PO-")):(poReal||"—")],["PO Request #",s.poReq||(isInv?"—":num)]];
+  var meta=[["Date",fmtDate(s.date)],["Disc",s.disc||"—"],["Start Date",s.start?fmtDate(s.start):"—"],["End Date",s.end?fmtDate(s.end):"—"],["Fleet #",s.fleet||"—"],["Location",s.location||"—"],["Work Type",wt,"full"],["PO Request #",s.poReq||(isInv?"—":num)],["PO #",isInv?(poReal||(b.key==="755"?"EWS-PO-":"EWSO-PO-")):(poReal||"—")]];
   if(isInv){ meta.push(["Terms",s.terms||"Net 60"]); meta.push(["Contact",s.contact||"—"]); }
   // Group line items under black category headers (Logistics, Equipment Service, Supporting Labor…). A new category = a new black band.
   var groups=[], gmap={};
@@ -1011,7 +1012,7 @@ function buildDoc(v){
   return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c"><b>'+esc(c.division)+'</b><br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
     +'<div class="doc-title"><div class="dt">'+(isInv?"INVOICE":"PO REQUEST")+'</div><div class="dn">'+(isInv?"INVOICE #":"PO REQUEST #")+': <b>'+esc(isInv?invNo:(s.poReq||num))+'</b></div><div class="dn">Billing Unit: <b>'+(b.key==="755"?"Evolution Well Services (755)":"Evolution Well Services Operating, LLC (765)")+'</b></div></div></div>'
     +'<div class="doc-rule"></div><div class="doc-meta"><div class="doc-billto"><div class="l">Bill To</div><div class="n">'+esc(bt.name)+'</div><div class="a">'+esc(bt.a1)+' · '+esc(bt.a2)+' · '+esc(bt.a3)+'</div></div>'
-    +meta.map(function(m){return '<div class="m"><span class="l">'+esc(m[0])+'</span><span class="v">'+esc(m[1])+'</span></div>';}).join("")+'</div>'
+    +meta.map(function(m){return '<div class="m'+(m[2]==="full"?" full":"")+'"><span class="l">'+esc(m[0])+'</span><span class="v">'+esc(m[1])+'</span></div>';}).join("")+'</div>'
     +'<table class="doc-tbl"><thead><tr><th class="gut"></th><th>Description</th><th class="c">Qty</th><th class="c">Unit</th><th class="r">Per Unit</th><th class="r">Amount</th></tr></thead><tbody>'+rows+'</tbody></table>'
     +'<div class="doc-tot"><div class="box"><div class="row"><span class="l">Subtotal</span><span class="v">'+money(sub)+'</span></div><div class="row grand"><span class="l">'+(isInv?"TOTAL DUE":"TOTAL")+'</span><span class="v">'+money(sub)+'</span></div></div></div>'
     +(s.notes?'<div class="doc-notes"><div class="h">Notes</div><div class="b">'+esc(s.notes)+'</div></div>':"")
