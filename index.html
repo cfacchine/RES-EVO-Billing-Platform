@@ -559,13 +559,26 @@ let RECORDS = {};        // in-memory line-item store for records generated this
 /* ============================ DATA MODEL ============================ */
 function ageBucket(d){ if(d<=0)return"Current"; if(d<=30)return"1-30"; if(d<=60)return"31-60"; if(d<=90)return"61-90"; return"90+"; }
 function unitFromInv(inv){ inv=String(inv||"").trim(); if(inv.charAt(0)==="5"&&inv.charAt(1)==="1")return"755"; if(inv.charAt(0)==="5"&&inv.charAt(1)==="0")return"765"; return"755"; }
+/* Decide 755 (Equipment Service) vs 765 (Operations) for a row.
+   Invoice # is authoritative (51xx=755, 50xx=765). With no invoice # (e.g. an un-invoiced PO request),
+   fall back to the discipline — Rig Up/Down, Roustabout, Logistics… are Operations (765) — then to the
+   stored Billing Unit. This stops un-invoiced Operations PO requests from defaulting to the 755 builder. */
+function unitFor(o){
+  var iv=String(o&&o.inv||"").trim();
+  if(iv.charAt(0)==="5"&&iv.charAt(1)==="1") return "755";
+  if(iv.charAt(0)==="5"&&iv.charAt(1)==="0") return "765";
+  var d=String(o&&o.disc||"").toLowerCase();
+  if(/rig\s*up|rig\s*down|roustabout|operation|logistic|haul|transport|swab|coil|pump\s*down|water\s*transfer|rig\s*move|labor/.test(d)) return "765";
+  if(/equipment/.test(d)) return "755";
+  return (o&&o.unit==="765")?"765":(o&&o.unit==="755")?"755":unitFromInv(iv);
+}
 function yn(v){ v=String(v||"").trim().toUpperCase(); return (v==="X"||v.charAt(0)==="Y"||v==="TRUE")?"Yes":"No"; }
 function parseNotes(n){ n=String(n||""); var fleet=""; var fm=n.match(/Fleet\s*#\s*(\d+)/i); if(fm)fleet=fm[1];
   var core=n.split(" - ").map(function(s){return s.trim();}).filter(function(p){return !/Fleet\s*#/i.test(p);});
   var operator=core[0]||"", disc=core.length>1?core[core.length-1]:"", location=core.slice(1,Math.max(1,core.length-1)).join(" - ");
   return {operator:operator, location:location, disc:disc, fleet:fleet}; }
 function toRows(arr){ return arr.map(function(r,ix){ var o={}; COLS.forEach(function(c,i){o[c]=r[i];}); o.amount=Number(o.amount)||0; o.id=ix;
-  var p=parseNotes(o.notes); o.operator=o.operator||p.operator; o.location=o.location||p.location; o.disc=o.disc||p.disc; o.fleet=o.fleet||p.fleet; o.unit=(o.unit==="755"||o.unit==="765")?o.unit:unitFromInv(o.inv);
+  var p=parseNotes(o.notes); o.operator=o.operator||p.operator; o.location=o.location||p.location; o.disc=o.disc||p.disc; o.fleet=o.fleet||p.fleet; o.unit=unitFor(o);
   o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent); o.paid=yn(o.paid);
   o.po=o.po||""; o.invoiceStatus=o.invoiceStatus||""; o.lineItems=Array.isArray(o.lineItems)?o.lineItems:[];
   o.age=Math.max(0,Math.round((TODAY-new Date(o.date+"T00:00:00"))/86400000)); o.bucket=ageBucket(o.age);
