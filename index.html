@@ -433,14 +433,14 @@ table.data tbody tr:last-child td{border-bottom:none}
   <style>
   .pipe-board{overflow-x:hidden;padding:2px 0 10px}
   .pipe-cols{display:flex;gap:10px;align-items:flex-start}
-  .pipe-col{flex:1 1 0;min-width:0;width:auto;background:var(--card,#fff);border:1px solid var(--line,#e3e8e4);border-radius:10px;display:flex;flex-direction:column;max-height:74vh}
+  .pipe-col{flex:1 1 0;min-width:0;width:auto;background:var(--card,#fff);border:1px solid var(--line,#e3e8e4);border-radius:10px;display:flex;flex-direction:column}
   /* Desktop: six columns share the width — no side-to-side scroll. Narrow screens swipe instead. */
   @media(max-width:900px){ .pipe-board{overflow-x:auto} .pipe-cols{gap:12px;min-width:min-content} .pipe-col{flex:0 0 236px;width:236px} }
   .pipe-h{padding:9px 12px;border-top-left-radius:10px;border-top-right-radius:10px;border-bottom:1px solid var(--line,#e3e8e4)}
   .pipe-t{font-weight:700;font-size:13px}
   .pipe-s{font-size:11px;color:var(--muted,#6b756e)}
   .pipe-n{font-size:11px;color:var(--muted,#6b756e);margin-top:2px}
-  .pipe-body{padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;min-height:40px}
+  .pipe-body{padding:8px;overflow-y:visible;flex:1;display:flex;flex-direction:column;gap:8px;min-height:40px}
   .pipe-card{border:1px solid var(--line,#e3e8e4);border-radius:8px;padding:8px 9px;background:#fff}
   .pipe-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
   .pipe-amt{font-weight:700;font-size:12.5px}
