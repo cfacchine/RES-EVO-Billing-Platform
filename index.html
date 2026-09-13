@@ -505,6 +505,10 @@ table.data tbody tr:last-child td{border-bottom:none}
       <div class="card-h"><div class="na-head"><h3>Revenue-Leak Guard</h3><span class="na-count" id="leakCount" style="background:var(--crit)">0</span></div><span class="eyebrow" id="leakAtRisk">—</span></div>
       <div class="card-b"><div id="leakBody"></div></div>
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-h"><div class="na-head"><h3>Work-Schedule Cross-Check</h3><span class="na-count" id="schedCount" style="background:#7a4fd0">0</span></div><span class="eyebrow" id="schedMeta">Fleet schedule → expected PO Requests</span></div>
+      <div class="card-b"><div class="sub" style="margin-bottom:10px">Reads the live <b>RES·EVO Fleet Tracker</b> schedule and flags rig-ups &amp; rig-downs with no matching PO Request yet — a completed service should have an Operations PO within days, and every Rig Up should also have an Equipment Service PO. <a href="#" onclick="refreshSchedule();return false;">Refresh</a></div><div id="schedBody"></div></div>
+    </div>
     <div class="card">
       <div class="card-h"><div class="na-head"><h3>Chase List</h3><span class="na-count" id="chaseCount" style="background:var(--warn-bg);color:var(--warn)">0</span></div><span class="eyebrow">Ranked by $ × age · escalation rung · what's blocking</span></div>
       <div class="card-b"><div class="tablewrap"><table class="data" id="chaseTbl">
@@ -560,6 +564,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 ============================================================================ */
 const CONFIG = {
   EXEC_URL: "https://script.google.com/macros/s/AKfycbxsF1tv_QxGWMUxpaZJiKsGRRMSj5Zlb05bLml6QRglE6T5X9Uq5Q22mjYnpdxbc3Ql/exec",   // deployed Apps Script Web App /exec URL → live mode
+  FLEET_API: "https://script.google.com/macros/s/AKfycbxzRn4DcbgvNJm432aNPTYE91QWNlrA79s8KG_aMtgYTtbFRqh57l76l8fH_QMWHCqMUg/exec",   // read-only: RES·EVO Fleet Tracker schedule → Work-Schedule Cross-Check
   GOOGLE_CLIENT_ID: "356147624842-1m9p45pem87hcea3tcfb1e7t5gn8e2d8.apps.googleusercontent.com",   // required Google Sign-In (restricted to the domain below) + Gmail send-from
   ALLOWED_DOMAIN: "revolution-es.com",
   COMPANY: { name:"Revolution Energy Services, Inc.", division:"Asset Management Division",
@@ -915,6 +920,83 @@ function ladderRung(x){
 }
 function median(a){ if(!a.length)return 0; var s=a.slice().sort(function(x,y){return x-y;}); var m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; }
 
+/* ---------- Work-Schedule Cross-Check — reads the live RES·EVO Fleet Tracker ---------- */
+var FLEET_SCHED=null, FLEET_SCHED_ERR=null, _fleetLoading=false;
+async function loadFleetSchedule(force){
+  if(FLEET_SCHED&&!force) return FLEET_SCHED;
+  if(!CONFIG.FLEET_API){ FLEET_SCHED_ERR="no endpoint"; return null; }
+  if(_fleetLoading) return null;
+  _fleetLoading=true;
+  try{ var r=await fetch(CONFIG.FLEET_API); var d=await r.json(); FLEET_SCHED=d; FLEET_SCHED_ERR=null; return d; }
+  catch(e){ FLEET_SCHED_ERR=String(e); return null; }
+  finally{ _fleetLoading=false; }
+}
+function refreshSchedule(){ FLEET_SCHED=null; FLEET_SCHED_ERR=null; renderScheduleCheck(); loadFleetSchedule(true).then(renderScheduleCheck); }
+function operMatch(a,b){ a=String(a||"").toLowerCase().trim(); b=String(b||"").toLowerCase().trim(); if(!a||!b) return false; return a===b||a.indexOf(b)>=0||b.indexOf(a)>=0; }
+function schedDayDelta(dstr){ var d=new Date(dstr+"T00:00:00"), n=new Date(); n.setHours(0,0,0,0); return Math.round((d-n)/86400000); }
+function schedWhen(x){ return x<0?(Math.abs(x)+"d ago"):(x===0?"today":("in "+x+"d")); }
+/* Is there already a billing row (PO request OR invoice) for this fleet+operator+unit near the op date? */
+function hasBillingFor(fleet,operator,opDate,unitWanted){
+  var od=opDate?new Date(opDate+"T00:00:00"):null;
+  return DATA.rows.some(function(r){
+    if(String(r.fleet||"")!==String(fleet)) return false;
+    if(!operMatch(r.operator,operator)) return false;
+    if(unitWanted&&r.unit!==unitWanted) return false;
+    if(!od||!r.date) return true;
+    return Math.abs((new Date(r.date+"T00:00:00")-od)/86400000)<=21;
+  });
+}
+function computeScheduleGaps(d){
+  var out=[];
+  ((d&&d.fleets)||[]).forEach(function(f){
+    [["Rig Up",f.rigUp,true],["Rig Down",f.rigDown,false]].forEach(function(p){
+      var opLabel=p[0], op=p[1], isRigUp=p[2];
+      if(!op||!op.date) return;
+      var operator=op.location||"", pad=op.pad||"";
+      if(!operator) return;                          // can't match confidently without an operator
+      var delta=schedDayDelta(op.date);
+      if(delta>21) return;                           // too far out to expect a PO yet
+      if(!hasBillingFor(f.num,operator,op.date,"765"))
+        out.push({fleet:f.num,operator:operator,pad:pad,date:op.date,delta:delta,op:opLabel,unit:"765",expected:"Operations PO",disc:opLabel});
+      if(isRigUp && !hasBillingFor(f.num,operator,op.date,"755"))
+        out.push({fleet:f.num,operator:operator,pad:pad,date:op.date,delta:delta,op:opLabel,unit:"755",expected:"Equipment Service PO",disc:"Equipment Service"});
+    });
+  });
+  out.sort(function(a,b){return (b.date||"").localeCompare(a.date||"");});
+  return out;
+}
+function startScheduledPO(fleet,operator,pad,unit,disc){
+  var v=(unit==="765")?"ops":"eq", s=state[v];
+  s.mode="PO REQUEST"; s.fleet=String(fleet); s.operator=operator; s.location=pad; s.disc=disc||(unit==="765"?"Rig Up":"Equipment Service");
+  s.poReq=""; s.inv=""; s.po="";
+  var rec=fleetRec(fleet); if(rec){ s.contact=rec.name; s.contactInfo=[rec.phone,rec.email].filter(Boolean).join("  ·  "); }
+  applyContact(v,s.contact);
+  switchView(v); renderBuilder(v);
+  toast("Started a "+(unit==="765"?"Operations":"Equipment Service")+" PO Request · Fleet #"+fleet+" · "+operator+" – "+pad);
+}
+function renderScheduleCheck(){
+  var el=document.getElementById("schedBody"); if(!el) return;
+  var cnt=document.getElementById("schedCount"), meta=document.getElementById("schedMeta");
+  if(!FLEET_SCHED){
+    if(cnt) cnt.textContent="—";
+    el.innerHTML = FLEET_SCHED_ERR
+      ? '<div class="sub" style="padding:8px 2px">Couldn’t reach the fleet schedule right now. <a href="#" onclick="refreshSchedule();return false;">Retry</a></div>'
+      : '<div class="sub" style="padding:8px 2px">Loading the fleet schedule…</div>';
+    return;
+  }
+  if(meta){ var lu=FLEET_SCHED.lastUpdated; meta.innerHTML="Schedule updated "+(lu?fmtDate(lu)+" "+new Date(lu).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"—"); }
+  var gaps=computeScheduleGaps(FLEET_SCHED);
+  if(cnt) cnt.textContent=gaps.length;
+  if(!gaps.length){ el.innerHTML='<div class="sub" style="padding:8px 2px">Every scheduled rig-up and rig-down has a matching PO Request. 🎉</div>'; return; }
+  var body=gaps.map(function(g){
+    var uchip = g.unit==="755" ? '<span class="chip-b" style="background:#e0f2f0;color:#0e7d72">755 · '+esc(g.expected)+'</span>' : '<span class="chip-b" style="background:#fbeadb;color:#b5541a">765 · '+esc(g.expected)+'</span>';
+    var opc = g.op==="Rig Up" ? "color:#7a4fd0" : "color:#c9821a";
+    var arg="'"+String(g.fleet).replace(/'/g,"\\'")+"','"+String(g.operator).replace(/'/g,"\\'")+"','"+String(g.pad).replace(/'/g,"\\'")+"','"+g.unit+"','"+String(g.disc).replace(/'/g,"\\'")+"'";
+    return '<tr><td class="c"><b>#'+esc(g.fleet)+'</b></td><td><b style="'+opc+'">'+esc(g.op)+'</b></td><td class="clip">'+esc(g.operator)+' – '+esc(g.pad)+'</td><td>'+fmtDate(g.date)+' <span class="sub">· '+schedWhen(g.delta)+'</span></td><td>'+uchip+'</td><td class="r"><button class="btn sm primary" onclick="startScheduledPO('+arg+')">Start PO ▸</button></td></tr>';
+  }).join("");
+  el.innerHTML='<div class="tablewrap"><table class="data"><thead><tr><th class="c">Fleet</th><th>Operation</th><th>Operator – Pad</th><th>Scheduled</th><th>Expected PO</th><th class="r">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+
 /* Open AR, optionally narrowed to one customer (the Customer filter on the view) */
 function openAR(){ var f=((document.getElementById("ccOper")||{}).value)||"";
   return DATA.rows.filter(function(x){ return !isPaid(x) && (!f || String(x.operator||"—")===f); }); }
@@ -955,6 +1037,8 @@ function renderCollectionsView(){
   renderStatements(open);
   renderLeakGuard();
   renderChase(open);
+  renderScheduleCheck();
+  if(!FLEET_SCHED && !FLEET_SCHED_ERR && !_fleetLoading && CONFIG.FLEET_API){ loadFleetSchedule().then(renderScheduleCheck); }
 }
 function renderChase(open){
   var list=open.map(function(x){ return {x:x, L:ladderRung(x), prio:x.amount*Math.max(1,(x.age||0))}; }).sort(function(a,b){return b.prio-a.prio;});
