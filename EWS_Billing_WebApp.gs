@@ -143,6 +143,33 @@ function mapCols_(m){
 function unitText_(u,inv){ var s=String(u||''); if(/765/.test(s)) return '765'; if(/755/.test(s)) return '755';
   var iv=String(inv||'').trim(); if(iv.charAt(0)==='5'&&iv.charAt(1)==='1') return '755'; if(iv.charAt(0)==='5'&&iv.charAt(1)==='0') return '765'; return '755'; }
 
+/* ONE-TIME: relabel the Billing Unit column to "OPERATING 765" / "SERVICE 755".
+   Safe & idempotent — only touches data rows where the unit is determinable, keeps the 765/755
+   number (so every read still resolves correctly), and can be undone via File → Version history.
+   Run it once from the Apps Script editor (Run ▸ relabelBillingUnit) after deploying this version. */
+function relabelBillingUnit(){
+  var ss=SpreadsheetApp.openById(BOOK_ID), changed=0, scanned=0;
+  TRK_TABS.forEach(function(name){
+    var sh=ss.getSheetByName(name); if(!sh||sh.getLastRow()<2) return;
+    var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
+    var hr=trackerHeaderRow_(vals); if(hr<0) return; var m=hdr_(vals[hr]);
+    var ui=col_(m,A.unit), ii=col_(m,A.inv), ai=col_(m,A.amount), pri=col_(m,A.poReq);
+    if(ui<0) return;
+    for(var r=hr+1;r<vals.length;r++){
+      var row=vals[r], inv=String(g_(row,ii)||'').trim(), amt=g_(row,ai), poReq=String(g_(row,pri)||'');
+      if(!inv && !amt && !poReq) continue;                       // skip blank rows
+      scanned++;
+      var cur=String(row[ui]||'');
+      var num = /765/.test(cur)?'765' : (/755/.test(cur)?'755' : null);
+      if(!num){ if(inv.charAt(0)==='5'&&inv.charAt(1)==='1') num='755'; else if(inv.charAt(0)==='5'&&inv.charAt(1)==='0') num='765'; }
+      if(!num) continue;                                         // can't determine — leave as-is
+      var label = (num==='765')?'765 · Operations':'755 · Equipment';
+      if(cur!==label){ sh.getRange(r+1, ui+1).setValue(label); changed++; }
+    }
+  });
+  return 'Relabeled '+changed+' of '+scanned+' Billing Unit cell(s).';
+}
+
 /* ============================ INSPECT (verification) ============================ */
 function inspect_(){
   var ss=SpreadsheetApp.openById(BOOK_ID), out={book:ss.getName(), tabs:[]};
@@ -304,7 +331,7 @@ function appendDoc_(p,action){
         sh.getRange(target-1,c+1).copyTo(sh.getRange(target,c+1),SpreadsheetApp.CopyPasteType.PASTE_FORMULA,false); } } }catch(e){}
   function setC(names,val){ var i=col_(m,names); if(i>=0 && val!==''&&val!=null) sh.getRange(target,i+1).setValue(val); }
   setC(A.inv,p.inv); setC(A.date, safeDate_(p.date)); setC(A.amount,amount);
-  setC(A.unit, p.unit==='765'?'Evolution Well Service Operating (765)':'Evolution Well Services (755)');
+  setC(A.unit, p.unit==='765'?'765 · Operations':'755 · Equipment');   // Billing Unit label (still carries 765/755 so reads stay correct)
   setC(A.operator,p.operator); setC(A.location,p.location); setC(A.disc,p.disc); setC(A.fleet,p.fleet);
   setC(A.poReq,p.poReq); setC(A.po,p.po); setC(A.lines,linesJson);
   setC(A.cName,p.contactName||p.contact); setC(A.cEmail,p.contactEmail); setC(A.cPhone,p.contactPhone);
