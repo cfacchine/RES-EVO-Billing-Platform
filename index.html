@@ -48,8 +48,18 @@ input[type=number]{-moz-appearance:textfield} input[type=number]::-webkit-outer-
 .appbar-title{display:flex;flex-direction:column;gap:2px;padding-left:16px;margin-left:2px;border-left:1px solid rgba(255,255,255,.14)}
 .appbar-title .t{font-family:"Archivo";font-weight:700;font-size:15px;color:#fff}
 .appbar-title .s{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--green-bright);display:flex;align-items:center;gap:6px}
-.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green-bright);animation:pulse 2.2s infinite}
+.st-ico{width:9px;height:9px;flex:none;display:inline-block;box-sizing:border-box}
+/* live: pulsing green dot */
+#dataStatus.is-live{color:var(--green-bright)}
+#dataStatus.is-live .st-ico{border-radius:50%;background:var(--green-bright);animation:pulse 2.2s infinite}
+/* connecting: neutral turning ring (hourglass) */
+#dataStatus.is-wait{color:rgba(255,255,255,.75)}
+#dataStatus.is-wait .st-ico{border-radius:50%;border:1.5px solid rgba(255,255,255,.3);border-top-color:#fff;background:transparent;animation:stspin .8s linear infinite}
+/* can't reach the sheet: amber turning ring — keeps spinning while it retries */
+#dataStatus.is-warn{color:var(--warn)}
+#dataStatus.is-warn .st-ico{border-radius:50%;border:1.5px solid rgba(214,158,46,.35);border-top-color:var(--warn);background:transparent;animation:stspin 1.1s linear infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,158,79,.5)}70%{box-shadow:0 0 0 7px rgba(52,158,79,0)}100%{box-shadow:0 0 0 0 rgba(52,158,79,0)}}
+@keyframes stspin{to{transform:rotate(360deg)}}
 .appbar-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
 .who{font-size:11px;color:var(--green-bright);margin-right:2px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ibtn{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.08);color:var(--app-fg);border:1px solid rgba(255,255,255,.16);padding:8px 13px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .15s}
@@ -282,7 +292,7 @@ table.data tbody tr:last-child td{border-bottom:none}
     <img class="brand-logo" src="logo.png" alt="Revolution Energy Services" onerror="this.style.display='none';document.getElementById('brandFallback').style.display='flex'">
     <div class="brand-mark" id="brandFallback" style="display:none"><span class="r1">REVOLUTION</span><span class="r2">ENERGY&nbsp;SERVICES</span></div>
   </div>
-  <div class="appbar-title"><span class="t">EVO Billing Tracker</span><span class="s"><span class="live-dot"></span><span id="dataMode">Demo data</span></span></div>
+  <div class="appbar-title"><span class="t">EVO Billing Tracker</span><span class="s is-wait" id="dataStatus" title="Connection to the billing sheet"><span class="st-ico"></span><span id="dataMode">Connecting…</span></span></div>
   <div class="appbar-actions">
     <span class="who" id="whoami"></span>
     <button class="ibtn" onclick="openAccessLog()" id="logBtn" title="Access Log — who has signed in" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 2M12 3a9 9 0 1 0 9 9"/><path d="M3 3v5h5"/></svg>Access Log</button>
@@ -304,7 +314,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 <div class="wrap">
   <!-- DASHBOARD -->
   <section class="view active" id="view-dashboard">
-    <div class="demo-banner" id="demoBanner">
+    <div class="demo-banner" id="demoBanner" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
       <span><b>Preview mode.</b> Showing your imported 2026 records. Deploy the web app + set its URL to read &amp; write the live sheet.</span>
     </div>
@@ -619,16 +629,30 @@ function isPaid(x){ return x.paid==="Yes"; }
 function needsSig(x){ return !isPaid(x) && x.signed!=="Yes"; }
 function needsPO(x){ return !isPaid(x) && x.poAssigned!=="Yes"; }
 
+var _retryT=null, _failN=0, _loading=false;
+function scheduleRetry(){ if(_retryT) clearTimeout(_retryT); var wait=_failN<4?8000:20000; _retryT=setTimeout(function(){ loadData(false); }, wait); }
 async function loadData(manual){
+  if(_loading) return;                                   // a load is already in flight
+  if(_retryT){ clearTimeout(_retryT); _retryT=null; }
   if(CONFIG.EXEC_URL){
-    try{ setMode("Loading…");
+    _loading=true;
+    setStatus(_failN?"is-warn":"is-wait", _failN?"Reconnecting…":"Connecting…");
+    try{
       var j=await fetch(CONFIG.EXEC_URL+"?action=summary").then(function(r){return r.json();});
       if(j&&j.rows){ LIVE_PAID = !!(j.rows.length && Object.prototype.hasOwnProperty.call(j.rows[0],"paid")); DATA.rows=toRows(j.rows.map(function(r){return COLS.map(function(c){return r[c];});}));
-        LIVE=true; setMode("Live · sheet"); demoOff(); await loadLiveConfig(); renderAll(); if(manual) toast("Refreshed from the live sheet"); return; }
+        LIVE=true; _failN=0; setStatus("is-live","Live · sheet"); demoOff(); await loadLiveConfig(); renderAll(); _loading=false;
+        if(manual) toast("Refreshed from the live sheet"); return; }
       throw 0;
-    }catch(e){ LIVE=false; setMode("Demo data · sheet unreachable"); DATA.rows=toRows(SAMPLE); renderAll(); if(manual) toast("Couldn’t reach the web app — showing imported sample","warn"); return; }
+    }catch(e){
+      LIVE=false; _failN++; _loading=false; demoOff();
+      setStatus("is-warn","Can’t reach sheet · retrying…");   // hourglass keeps turning; no demo data
+      if(!DATA.rows.length) renderAll();                       // first load with nothing yet → show clean empty state
+      if(manual) toast("Can’t reach the sheet right now — retrying automatically","warn");
+      scheduleRetry(); return;
+    }
   }
-  LIVE=false; setMode("Demo data"); DATA.rows=toRows(SAMPLE); renderAll(); if(manual) toast("Reloaded imported sample");
+  LIVE=false; demoOff(); setStatus("is-warn","Not connected to sheet");   // no web app URL configured
+  if(!DATA.rows.length) renderAll();
 }
 async function loadLiveConfig(){
   try{ var sc=await fetch(CONFIG.EXEC_URL+"?action=schedule").then(function(r){return r.json();});
@@ -644,7 +668,12 @@ async function loadLiveConfig(){
   try{ var em=await fetch(CONFIG.EXEC_URL+"?action=emails").then(function(r){return r.json();});   // CC lists from the Email Lists tab
     if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
 }
-function setMode(t){ document.getElementById("dataMode").textContent=t; }
+function setStatus(state,text){
+  var el=document.getElementById("dataStatus");
+  if(el){ el.classList.remove("is-live","is-wait","is-warn"); el.classList.add(state); }
+  var m=document.getElementById("dataMode"); if(m&&text!=null) m.textContent=text;
+}
+function setMode(t){ var m=document.getElementById("dataMode"); if(m) m.textContent=t; }   // legacy shim
 function demoOff(){ var b=document.getElementById("demoBanner"); if(b) b.style.display="none"; }
 
 /* ============================ FORMAT ============================ */
@@ -1520,6 +1549,9 @@ async function gmailCreateDraft(to,cc,subject,body,pdfBlob,fname,extra){
 
 gateInit();
 loadData();
+/* keep trying to reach the sheet when the network comes back or the tab is refocused */
+window.addEventListener("online", function(){ if(!LIVE) loadData(false); });
+document.addEventListener("visibilitychange", function(){ if(!LIVE && !document.hidden) loadData(false); });
 </script>
 </body>
 </html>
