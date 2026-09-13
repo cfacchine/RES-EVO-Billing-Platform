@@ -29,6 +29,17 @@ var LOG_TAB  = 'Access Log';                                     // sign-in audi
 var EMAIL_TAB= 'Email Lists';                                    // CC recipients per doc type: A=PO Request, B=Invoice, C=Reminder, D=Collections
 var DRIVE_ROOT = '1uMR9dqS52Z4ZqUAqmIaLzUqLhpmmtAZY';           // shared "EWS Billing" folder — PDFs saved here (Unit/Year/Month/Type)
 
+/* Inbox auto-file (#1): scans Gmail for customer replies with a PDF, files it to your Drive by year
+   (approved PO → "PO Assigned"/Year, signed invoice → "Invoice Signed"/Year), links it on the tracker
+   row and flags it for a one-click confirm. It NEVER flips PO/Signed on its own. Preview-safe. */
+var INBOX = {
+  POASSIGNED_FOLDER: 'PO Assigned',       // approved customer-PO PDFs land here (under EWS Billing / <folder> / <year>)
+  SIGNED_FOLDER:     'Invoice Signed',    // signed-invoice PDFs land here
+  LOG_TAB: 'Inbox Log',                   // processed Gmail message ids (dedupe)
+  LOOKBACK_DAYS: 30,                      // scan replies received in the last N days
+  HOUR: 6                                 // daily trigger hour if you install it
+};
+
 /* Email CC lists — one "Email Lists" tab controls who is CC'd on each document type. These defaults seed
    the tab the first time the app reads it (or Run ▸ seedEmailLists); after that the sheet is the source
    of truth. The "To" is always the fleet contact from the Fleet Directory tab. */
@@ -66,7 +77,10 @@ var A = {
   paidDate:['date paid','paid date','paid on'],
   sentDate:['invoice sent date','sent date','date sent'],
   poReqPdf:['po request pdf','po request pdf link'],
-  invPdf:['invoice pdf','invoice pdf link']
+  invPdf:['invoice pdf','invoice pdf link'],
+  poPdf:['po assigned pdf','approved po pdf','customer po pdf'],   // approved customer-PO PDF (filed by Inbox auto-file)
+  sgnPdf:['signed invoice pdf','signed pdf'],                      // signed-invoice PDF (filed by Inbox auto-file)
+  inbox:['inbox','inbox flag','inbox status']                     // "PO received — confirm" / "Signed — confirm"
 };
 
 function doGet(e){
@@ -115,6 +129,7 @@ function getSummary_(){
         contactName:String(g_(v,ci.cName)||''), contactEmail:String(g_(v,ci.cEmail)||''), contactPhone:String(g_(v,ci.cPhone)||''),
         terms:String(g_(v,ci.terms)||''), paidDate:fmtDate_(g_(v,ci.paidDate)), sentDate:fmtDate_(g_(v,ci.sentDate)),
         pdfUrl:String(g_(v,ci.invPdf)||g_(v,ci.poReqPdf)||''),
+        poPdf:String(g_(v,ci.poPdf)||''), sgnPdf:String(g_(v,ci.sgnPdf)||''), inboxFlag:String(g_(v,ci.inbox)||''),
         lineItems:pk.lines, notes:(pk.notes || String(g_(v,ci.notes)||'')),
         _tab:name }); }
   });
@@ -530,13 +545,15 @@ function apSendReminder_(x,type,em){
       +'\nAmount: $'+(Number(x.amount)||0).toLocaleString()+'\nInvoice date: '+x.date+'\n\nThank you,\nRevolution Energy Services · Accounts Receivable';
     var cc=((type==='collections')?(em&&em.collections):(em&&em.reminder))||AUTOPILOT.CC;   // Collections CC for past-due, Reminder CC for signature
     var opts={ cc: cc.filter(function(e){return e.toLowerCase()!==to.toLowerCase();}).join(','), name:'Revolution Energy Services' };
-    var pdf=apFetchPdf_(x.pdfUrl); if(pdf) opts.attachments=[pdf];
+    var atts=[]; var p1=apFetchPdf_(x.pdfUrl); if(p1) atts.push(p1); var p2=apFetchPdf_(x.poPdf); if(p2) atts.push(p2); if(atts.length) opts.attachments=atts;   // invoice + approved-PO PDF
+    if(type==='signature') opts.htmlBody='<div style="font:14px/1.55 Arial,sans-serif;color:#1b1b1b"><div style="background:#b3261e;color:#fff;font-weight:700;font-size:15px;padding:11px 15px;border-radius:6px;margin-bottom:14px">PLEASE SIGN AND RETURN THE ATTACHED INVOICE</div>'+esc_(body).replace(/\n/g,'<br>')+'</div>';
     if(AUTOPILOT.MODE==='send') GmailApp.sendEmail(to,subj,body,opts); else GmailApp.createDraft(to,subj,body,opts);
     updateRow_({inv:x.inv, poReq:x.poReq, field:'reminder', value:'Yes'});
     return true;
   }catch(e){ return false; }
 }
 function apFetchPdf_(url){ try{ if(!url) return null; var m=String(url).match(/[-\w]{25,}/); return m?DriveApp.getFileById(m[0]).getBlob():null; }catch(e){ return null; } }
+function esc_(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function apSendDigest_(did, escalations, agingPO, data){
   var open=data.filter(function(x){return String(x.paid)!=='Yes' && x.inv;});
@@ -569,3 +586,79 @@ function apLogWrite_(key,date,type,label){
   sh.appendRow([date,key,type,label,AUTOPILOT.MODE]);
 }
 function apDays_(d,today){ if(!d) return 0; var dd=(d instanceof Date)?d:new Date(String(d)+'T00:00:00'); if(isNaN(dd.getTime())) return 0; return Math.max(0,Math.round((today-dd)/86400000)); }
+
+/*************************************************************************************************
+ * INBOX AUTO-FILE (#1) — scans Gmail for customer replies carrying a PDF, files it to Drive by
+ *   year (approved PO → "PO Assigned"/Year, signed invoice → "Invoice Signed"/Year), links it on
+ *   the matching tracker row and flags it "… — confirm". It NEVER flips PO/Signed on its own —
+ *   you do that with one click on the Pipeline. Safe to re-run; each Gmail message is filed once.
+ *
+ *   Run ▸ inboxScanPreview   → reports what it WOULD file, writes nothing.
+ *   Run ▸ scanInbox          → files + links + flags for real.
+ *   Run ▸ installInboxScan   → do it automatically every day (approve the Gmail/Drive prompt once).
+ *   Run ▸ removeInboxScan    → stop the daily run.
+ *************************************************************************************************/
+function inboxScanPreview(){ return scanInbox_(true); }
+function scanInbox(){ return scanInbox_(false); }
+function installInboxScan(){
+  removeInboxScan();
+  ScriptApp.newTrigger('scanInbox').timeBased().everyDays(1).atHour(INBOX.HOUR).create();
+  return 'Inbox auto-file installed — runs daily ~'+INBOX.HOUR+':00. Preview any time with inboxScanPreview.';
+}
+function removeInboxScan(){ var n=0; ScriptApp.getProjectTriggers().forEach(function(t){ if(t.getHandlerFunction()==='scanInbox'){ ScriptApp.deleteTrigger(t); n++; } }); return 'Removed '+n+' inbox trigger(s).'; }
+
+function scanInbox_(preview){
+  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB);
+  if(!sh) return 'Billing Tracker tab not found.';
+  var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
+  var hr=trackerHeaderRow_(vals); if(hr<0) hr=0;
+  var m = preview ? hdr_(vals[hr]) : ensureInboxCols_(sh,hr);      // add PO/Signed PDF + Inbox columns if missing
+  var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), iPo=col_(m,A.po);
+  var byInv={}, byPoReq={};
+  for(var r=hr+1;r<vals.length;r++){
+    var inv=String(iInv>=0?vals[r][iInv]:'').trim(); if(inv) byInv[inv.toLowerCase()]=r;
+    var pr=String(iPoReq>=0?vals[r][iPoReq]:'').trim(); if(pr) byPoReq[pr.toLowerCase()]=r;
+  }
+  var seen=inboxSeen_(ss), root=DriveApp.getFolderById(DRIVE_ROOT), filed=[];
+  var q='in:inbox has:attachment newer_than:'+INBOX.LOOKBACK_DAYS+'d (subject:"PO Request" OR subject:"Invoice" OR "EWS-POR" OR "EWSO-POR")';
+  GmailApp.search(q,0,80).forEach(function(th){
+    th.getMessages().forEach(function(msg){
+      try{
+        var id=msg.getId(); if(seen[id]) return;
+        if(/revolution-es\.com/i.test(msg.getFrom()||'')) return;                 // skip our own sends
+        var atts=msg.getAttachments().filter(function(a){ return /\.pdf$/i.test(a.getName())||a.getContentType()==='application/pdf'; });
+        if(!atts.length) return;
+        var subj=msg.getSubject()||'';
+        var invM=subj.match(/\b(5[01]\d{3,})\b/), poM=subj.match(/EWSO?-POR-\S+/i);
+        var kind=null, rowIdx=-1, docNo='';
+        if(invM && byInv[invM[1].toLowerCase()]!=null){ kind='signed'; rowIdx=byInv[invM[1].toLowerCase()]; docNo=invM[1]; }
+        else if(poM && byPoReq[poM[0].toLowerCase()]!=null){ kind='po'; rowIdx=byPoReq[poM[0].toLowerCase()]; docNo=poM[0]; }
+        if(!kind || rowIdx<0) return;
+        var year=String((msg.getDate()||new Date()).getFullYear());
+        var folderName=(kind==='signed')?INBOX.SIGNED_FOLDER:INBOX.POASSIGNED_FOLDER;
+        var fname=((kind==='signed')?'Signed_Invoice_':'Approved_PO_')+docNo+'.pdf';
+        if(preview){ filed.push(fname+'  →  '+folderName+' / '+year+'   (from '+String(msg.getFrom()).replace(/.*</,'').replace('>','')+')'); return; }
+        var folder=folderChild_(folderChild_(root,folderName),year);
+        var ex=folder.getFilesByName(fname); while(ex.hasNext()) ex.next().setTrashed(true);
+        var url=folder.createFile(atts[0].copyBlob().setName(fname)).getUrl();
+        setCellByName_(sh,rowIdx,m,(kind==='signed')?A.sgnPdf:A.poPdf,url);
+        setCellByName_(sh,rowIdx,m,A.inbox,(kind==='signed')?'Signed PDF received — confirm':'Customer PO received — confirm');
+        inboxMarkSeen_(ss,id,fname);
+        filed.push(fname+'  →  '+folderName+' / '+year);
+      }catch(e){ /* skip a bad message, keep going */ }
+    });
+  });
+  return (preview?'WOULD file ':'Filed ')+filed.length+' PDF(s)'+(filed.length?':\n • '+filed.join('\n • '):'.')+(preview?'\n\n(preview only — nothing written)':'');
+}
+function ensureInboxCols_(sh,hr){
+  var need=[['po assigned pdf','PO Assigned PDF'],['signed invoice pdf','Signed Invoice PDF'],['inbox','Inbox']];
+  var hdrs=sh.getRange(hr+1,1,1,sh.getLastColumn()).getValues()[0].map(function(x){return String(x).trim().toLowerCase();});
+  need.forEach(function(p){ if(hdrs.indexOf(p[0])<0){ sh.getRange(hr+1,sh.getLastColumn()+1).setValue(p[1]); } });
+  return hdr_(sh.getRange(hr+1,1,1,sh.getLastColumn()).getValues()[0]);
+}
+function setCellByName_(sh,rowIdx,m,names,val){ var c=col_(m,names); if(c>=0 && val!==''&&val!=null) sh.getRange(rowIdx+1,c+1).setValue(val); }
+function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
+  sh.getRange(2,1,sh.getLastRow()-1,1).getValues().forEach(function(r){ if(r[0]) map[String(r[0])]=1; }); return map; }
+function inboxMarkSeen_(ss,id,label){ var sh=ss.getSheetByName(INBOX.LOG_TAB);
+  if(!sh){ sh=ss.insertSheet(INBOX.LOG_TAB); sh.getRange(1,1,1,3).setValues([['Message Id','Filed','When']]); sh.setFrozenRows(1); }
+  sh.appendRow([id,label,new Date()]); }
