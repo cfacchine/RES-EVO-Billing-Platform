@@ -296,6 +296,7 @@ table.data tbody tr:last-child td{border-bottom:none}
 <nav class="tabs" role="tablist">
   <button class="tab active" data-view="dashboard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
   <button class="tab" data-view="tracker"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9h16M4 14h16M10 4v16"/></svg>Billing Tracker</button>
+  <button class="tab" data-view="pipeline"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h4v14H4zM10 5h4v10h-4zM16 5h4v6h-4z"/></svg>Pipeline</button>
   <button class="tab" data-view="eq"><span class="tnum">755</span>Equipment Service</button>
   <button class="tab" data-view="ops"><span class="tnum">765</span>Operations</button>
 </nav>
@@ -403,6 +404,35 @@ table.data tbody tr:last-child td{border-bottom:none}
         <tbody id="trackBody"></tbody>
       </table></div>
     </div></div>
+  </section>
+
+  <!-- PIPELINE -->
+  <style>
+  .pipe-board{overflow-x:auto;padding:2px 0 10px}
+  .pipe-cols{display:flex;gap:12px;min-width:min-content;align-items:flex-start}
+  .pipe-col{flex:0 0 244px;width:244px;background:var(--card,#fff);border:1px solid var(--line,#e3e8e4);border-radius:10px;display:flex;flex-direction:column;max-height:74vh}
+  .pipe-h{padding:9px 12px;border-top-left-radius:10px;border-top-right-radius:10px;border-bottom:1px solid var(--line,#e3e8e4)}
+  .pipe-t{font-weight:700;font-size:13px}
+  .pipe-s{font-size:11px;color:var(--muted,#6b756e)}
+  .pipe-n{font-size:11px;color:var(--muted,#6b756e);margin-top:2px}
+  .pipe-body{padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;min-height:40px}
+  .pipe-card{border:1px solid var(--line,#e3e8e4);border-radius:8px;padding:8px 9px;background:#fff}
+  .pipe-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+  .pipe-amt{font-weight:700;font-size:12.5px}
+  .pipe-who{font-size:12px;font-weight:600;line-height:1.25}
+  .pipe-meta{font-size:10.5px;color:var(--muted,#6b756e);margin:2px 0 7px}
+  .pipe-acts{display:flex;flex-wrap:wrap;gap:5px}
+  .pipe-btn{font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;border:1px solid var(--line,#d7ddd8);background:#fff;color:#33413a;cursor:pointer;line-height:1.2}
+  .pipe-btn:hover{background:#f4f7f5}
+  .pipe-btn.primary{background:#11241b;color:#fff;border-color:#11241b}
+  .pipe-btn.primary:hover{background:#1c3a2b}
+  .pipe-empty{font-size:11px;color:#aab3ac;text-align:center;padding:16px 0}
+  .pipe-paid{font-size:12px;color:#5c6b63;text-align:center;padding:18px 6px;line-height:1.55}
+  @media(max-width:600px){.pipe-col{flex-basis:82vw;width:82vw}}
+  </style>
+  <section class="view" id="view-pipeline">
+    <div class="section-head"><div><div class="eyebrow">Workflow</div><h2>Pipeline</h2><div class="sub">Every open item by stage, oldest first — each card shows the one next step, click it to advance. Shows all open work regardless of the period filter.</div></div></div>
+    <div class="pipe-board"><div class="pipe-cols" id="pipeCols"></div></div>
   </section>
 
   <section class="view" id="view-eq"></section>
@@ -633,7 +663,7 @@ function buildPeriod(){ var yrs=[...new Set(DATA.rows.map(function(x){return x.d
   var sel=document.getElementById("pYear"); var cur=sel.value;
   sel.innerHTML='<option value="">All years</option>'+yrs.map(function(y){return "<option>"+y+"</option>";}).join("");
   sel.value = cur || (yrs.indexOf(2026)>=0?"2026":(yrs[0]||"")); }
-function renderDash(){ renderKpis(); renderNeeds(); renderReady(); renderCollections(); renderUnitBars(); renderTrend(); renderArOps(); renderDesk(); }
+function renderDash(){ renderKpis(); renderNeeds(); renderReady(); renderCollections(); renderUnitBars(); renderTrend(); renderArOps(); renderDesk(); if(document.getElementById("pipeCols")) renderPipeline(); }
 
 function renderKpis(){
   var r=dashRows(), total=r.reduce(function(a,x){return a+x.amount;},0);
@@ -903,6 +933,53 @@ function renderDesk(){
   document.getElementById("deskCount").textContent=rows.length+" of "+dashRows().length;
 }
 function toggleDesk(id){ deskOpen[id]=!deskOpen[id]; renderDesk(); }
+
+/* ============================ PIPELINE ============================ */
+var PIPE_STAGES=[
+  {key:"porequested",label:"PO Requested",sub:"Awaiting customer PO",c:"#8a978f"},
+  {key:"poassigned", label:"PO Assigned", sub:"Ready to invoice",   c:"#1c5fb0"},
+  {key:"invoiced",   label:"Invoiced",    sub:"Awaiting signature", c:"#a86a00"},
+  {key:"reminded",   label:"Reminded",    sub:"Awaiting signature", c:"#b3261e"},
+  {key:"signed",     label:"Signed",      sub:"Awaiting payment",   c:"#1a7a3e"},
+  {key:"paid",       label:"Paid",        sub:"Closed",             c:"#5c6b63"}
+];
+function pipeStage(x){
+  if(x.paid==="Yes") return "paid";
+  if(x.signed==="Yes") return "signed";
+  if(x.inv) return x.reminderSent==="Yes"?"reminded":"invoiced";
+  if(x.po || x.poAssigned==="Yes") return "poassigned";
+  return "porequested";
+}
+function pipeActions(x){
+  var id=x.id, s=pipeStage(x), b=[];
+  if(s==="porequested"){ b.push(["Add PO & invoice","openRecord("+id+")",1]); b.push(["Mark PO received","editRow("+id+",'poAssigned','Yes')",0]); }
+  else if(s==="poassigned"){ b.push(["Generate invoice","openRecord("+id+")",1]); }
+  else if(s==="invoiced"){ b.push(["Mark signed","editRow("+id+",'signed','Yes')",1]); b.push(["Send reminder","reminder("+id+")",0]); }
+  else if(s==="reminded"){ b.push(["Mark signed","editRow("+id+",'signed','Yes')",1]); b.push(["Remind again","reminder("+id+")",0]); }
+  else if(s==="signed"){ b.push(["Mark paid","editRow("+id+",'paid','Yes')",1]); }
+  return b;
+}
+function renderPipeline(){
+  var host=document.getElementById("pipeCols"); if(!host) return;
+  var groups={}; PIPE_STAGES.forEach(function(s){groups[s.key]=[];});
+  (DATA.rows||[]).forEach(function(x){ (groups[pipeStage(x)] || (groups[pipeStage(x)]=[])).push(x); });
+  Object.keys(groups).forEach(function(k){ groups[k].sort(function(a,b){return (b.age||0)-(a.age||0);}); });
+  host.innerHTML=PIPE_STAGES.map(function(s){
+    var list=groups[s.key]||[], tot=list.reduce(function(a,x){return a+x.amount;},0);
+    var head='<div class="pipe-h" style="border-top:3px solid '+s.c+'"><div class="pipe-t" style="color:'+s.c+'">'+s.label+'</div><div class="pipe-s">'+s.sub+'</div><div class="pipe-n"><b>'+list.length+'</b> · '+money0(tot)+'</div></div>';
+    var body;
+    if(s.key==="paid"){ body='<div class="pipe-paid"><b>'+list.length+'</b> invoices<br><b>'+money0(tot)+'</b> collected</div>'; }
+    else if(!list.length){ body='<div class="pipe-empty">Nothing here</div>'; }
+    else body=list.map(function(x){
+      var acts=pipeActions(x).map(function(a){return '<button class="pipe-btn'+(a[2]?" primary":"")+'" onclick="event.stopPropagation();'+a[1]+'">'+esc(a[0])+'</button>';}).join("");
+      return '<div class="pipe-card"><div class="pipe-card-top"><span class="unitbadge u'+x.unit+'">'+x.unit+'</span><span class="pipe-amt">'+money(x.amount)+'</span></div>'
+        +'<div class="pipe-who">'+esc(x.operator||"—")+' · '+esc(x.location||"—")+'</div>'
+        +'<div class="pipe-meta">'+esc(x.inv||x.poReq||"—")+' · Fleet '+esc(x.fleet||"—")+' · '+(x.age||0)+'d</div>'
+        +'<div class="pipe-acts">'+acts+'</div></div>';
+    }).join("");
+    return '<div class="pipe-col">'+head+'<div class="pipe-body">'+body+'</div></div>';
+  }).join("");
+}
 
 /* ============================ BUILDERS ============================ */
 var B={ eq:{key:"755",view:"eq",title:"Equipment Service"}, ops:{key:"765",view:"ops",title:"Operations"} };
