@@ -66,10 +66,19 @@ input[type=number]{-moz-appearance:textfield} input[type=number]::-webkit-outer-
 .ibtn:hover{background:rgba(255,255,255,.16)} .ibtn svg{width:15px;height:15px}
 
 .tabs{position:sticky;top:61px;z-index:30;background:var(--card);border-bottom:1px solid var(--line);display:flex;gap:2px;padding:0 20px;box-shadow:var(--shadow-sm);overflow-x:auto}
-.tab{appearance:none;background:none;border:none;cursor:pointer;color:var(--muted);font-weight:600;font-size:13.5px;padding:15px 18px 13px;border-bottom:3px solid transparent;display:flex;align-items:center;gap:9px;white-space:nowrap;transition:color .15s}
-.tab .tnum{font-family:"Archivo";font-weight:800;font-size:11px;letter-spacing:.05em;padding:2px 7px;border-radius:20px;background:var(--card-2);color:var(--muted);border:1px solid var(--line)}
-.tab:hover{color:var(--text)} .tab.active{color:var(--text);border-bottom-color:var(--green)}
-.tab.active .tnum{background:var(--green);color:#fff;border-color:var(--green)}
+.tab[data-view="dashboard"]{--tc:#2f6fb0}
+.tab[data-view="tracker"]{--tc:#1a7a3e}
+.tab[data-view="pipeline"]{--tc:#7a4fd0}
+.tab[data-view="collections"]{--tc:#c9821a}
+.tab[data-view="eq"]{--tc:#0e9488}
+.tab[data-view="ops"]{--tc:#d2691e}
+.tab{--tc:var(--green);appearance:none;background:none;border:none;cursor:pointer;color:var(--muted);font-weight:600;font-size:13.5px;padding:10px 15px 8px;border-bottom:3px solid transparent;display:flex;align-items:center;gap:10px;white-space:nowrap;transition:color .15s}
+.tab svg{width:18px;height:18px;padding:6px;box-sizing:content-box;border-radius:9px;color:var(--tc);background:var(--card-2);background:color-mix(in srgb,var(--tc) 15%,transparent);transition:.15s}
+.tab .tnum{font-family:"Archivo";font-weight:800;font-size:12px;letter-spacing:.05em;padding:5px 9px;border-radius:9px;color:var(--tc);background:var(--card-2);background:color-mix(in srgb,var(--tc) 15%,transparent);border:1px solid transparent;border-color:color-mix(in srgb,var(--tc) 32%,transparent)}
+.tab:hover{color:var(--text)} .tab:hover svg{background:color-mix(in srgb,var(--tc) 26%,transparent)}
+.tab.active{color:var(--tc);border-bottom-color:var(--tc)}
+.tab.active svg{color:#fff;background:var(--tc)}
+.tab.active .tnum{background:var(--tc);color:#fff;border-color:var(--tc)}
 
 .wrap{max-width:1240px;margin:0 auto;padding:26px 20px 60px}
 .view{display:none;animation:fade .25s ease} .view.active{display:block}
@@ -187,13 +196,15 @@ table.data tbody tr:last-child td{border-bottom:none}
 .li-foot .lbl{color:var(--muted);font-size:12px} .li-foot .amt{font-family:"Archivo";font-weight:800;font-size:19px;color:var(--green-deep);font-variant-numeric:tabular-nums}
 
 .preview-col{position:sticky;top:118px}
-.preview-head{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap}
+.preview-head{display:flex;flex-direction:column;align-items:stretch;gap:10px;margin-bottom:12px} .preview-head>.seg{align-self:flex-start}
 .seg{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px}
 .seg button{border:none;background:none;font-weight:600;font-size:12.5px;color:var(--muted);padding:7px 14px;border-radius:6px;cursor:pointer} .seg button.on{background:var(--green);color:#fff}
-.pv-actions{display:flex;gap:8px;flex-wrap:wrap}
+.pv-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px} .pv-actions .btn{margin:0;justify-content:center;padding:9px 10px} @media(max-width:560px){.pv-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card);color:var(--text);font-weight:600;font-size:12.5px;padding:9px 13px;border-radius:8px;cursor:pointer;transition:.15s} .btn:hover{border-color:var(--green)} .btn svg{width:15px;height:15px}
 .btn.primary{background:var(--green);border-color:var(--green);color:#fff} .btn.primary:hover{background:var(--green-deep)}
 .btn.dark{background:var(--ink);border-color:var(--ink);color:#fff} .btn.sm{padding:7px 11px;font-size:12px}
+.btn.info{background:var(--info);border-color:var(--info);color:#fff} .btn.info:hover{border-color:var(--info);filter:brightness(1.08)}
+.btn.danger{background:transparent;border-color:var(--crit);color:var(--crit)} .btn.danger:hover{background:var(--crit);border-color:var(--crit);color:#fff}
 .paper-frame{background:var(--card-2);border:1px solid var(--line);border-radius:var(--radius);padding:16px;max-height:80vh;overflow:auto}
 
 .doc{background:#fff;color:#1b1b1b;width:100%;max-width:720px;margin:0 auto;padding:30px 32px;font-family:"IBM Plex Sans",Arial,sans-serif;font-size:11px;box-shadow:0 2px 14px rgba(0,0,0,.14);border-radius:2px}
@@ -307,6 +318,7 @@ table.data tbody tr:last-child td{border-bottom:none}
   <button class="tab active" data-view="dashboard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
   <button class="tab" data-view="tracker"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9h16M4 14h16M10 4v16"/></svg>Billing Tracker</button>
   <button class="tab" data-view="pipeline"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h4v14H4zM10 5h4v10h-4zM16 5h4v6h-4z"/></svg>Pipeline</button>
+  <button class="tab" data-view="collections"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.3a2.6 2.6 0 0 0-2.5-1.6c-1.4 0-2.5.8-2.5 1.9s1 1.6 2.5 2 2.5.9 2.5 2-1.1 1.9-2.5 1.9a2.6 2.6 0 0 1-2.5-1.6M12 6.4v11.2"/></svg>Collections</button>
   <button class="tab" data-view="eq"><span class="tnum">755</span>Equipment Service</button>
   <button class="tab" data-view="ops"><span class="tnum">765</span>Operations</button>
 </nav>
@@ -371,8 +383,9 @@ table.data tbody tr:last-child td{border-bottom:none}
       <div class="card-b">
         <div class="sub" id="collectSummary" style="margin-bottom:12px">—</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" onclick="switchView('collections')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.3a2.6 2.6 0 0 0-2.5-1.6c-1.4 0-2.5.8-2.5 1.9s1 1.6 2.5 2 2.5.9 2.5 2-1.1 1.9-2.5 1.9a2.6 2.6 0 0 1-2.5-1.6M12 6.4v11.2"/></svg>Collections Command Center ▸</button>
           <button class="btn" onclick="downloadARStatement()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download AR Statement</button>
-          <button class="btn dark" onclick="openCollections()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Draft 7-day reminders</button>
+          <button class="btn dark" onclick="openCollections()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Draft reminders</button>
         </div>
       </div>
     </div>
@@ -418,9 +431,11 @@ table.data tbody tr:last-child td{border-bottom:none}
 
   <!-- PIPELINE -->
   <style>
-  .pipe-board{overflow-x:auto;padding:2px 0 10px}
-  .pipe-cols{display:flex;gap:12px;min-width:min-content;align-items:flex-start}
-  .pipe-col{flex:0 0 244px;width:244px;background:var(--card,#fff);border:1px solid var(--line,#e3e8e4);border-radius:10px;display:flex;flex-direction:column;max-height:74vh}
+  .pipe-board{overflow-x:hidden;padding:2px 0 10px}
+  .pipe-cols{display:flex;gap:10px;align-items:flex-start}
+  .pipe-col{flex:1 1 0;min-width:0;width:auto;background:var(--card,#fff);border:1px solid var(--line,#e3e8e4);border-radius:10px;display:flex;flex-direction:column;max-height:74vh}
+  /* Desktop: six columns share the width — no side-to-side scroll. Narrow screens swipe instead. */
+  @media(max-width:900px){ .pipe-board{overflow-x:auto} .pipe-cols{gap:12px;min-width:min-content} .pipe-col{flex:0 0 236px;width:236px} }
   .pipe-h{padding:9px 12px;border-top-left-radius:10px;border-top-right-radius:10px;border-bottom:1px solid var(--line,#e3e8e4)}
   .pipe-t{font-weight:700;font-size:13px}
   .pipe-s{font-size:11px;color:var(--muted,#6b756e)}
@@ -444,6 +459,59 @@ table.data tbody tr:last-child td{border-bottom:none}
   <section class="view" id="view-pipeline">
     <div class="section-head"><div><div class="eyebrow">Workflow</div><h2>Pipeline</h2><div class="sub">Every open item by stage, oldest first — each card shows the one next step, click it to advance. Shows all open work regardless of the period filter.</div></div></div>
     <div class="pipe-board"><div class="pipe-cols" id="pipeCols"></div></div>
+  </section>
+
+  <!-- COLLECTIONS COMMAND CENTER -->
+  <style>
+  #view-collections .kpis{grid-template-columns:repeat(5,1fr)}
+  #view-collections table.data{min-width:820px}
+  #view-collections table.data th.c,#view-collections table.data td.c{text-align:center}
+  .rung{display:inline-block;color:#fff;font-family:"Archivo";font-weight:700;font-size:9.5px;letter-spacing:.02em;padding:2px 7px;border-radius:20px;white-space:nowrap}
+  .chip-b{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+  .stmt-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line-2)} .stmt-row:last-child{border-bottom:none}
+  .stmt-main b{font-size:13px}
+  details.leak{border:1px solid var(--line);border-radius:9px;margin-bottom:8px;overflow:hidden}
+  details.leak>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 13px;font-size:13px;background:var(--card)}
+  details.leak>summary::-webkit-details-marker{display:none}
+  details.leak[open]>summary{border-bottom:1px solid var(--line)}
+  .leak-dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .leak-cnt{font-family:"Archivo";font-weight:800;font-size:11px;color:#fff;background:var(--muted);border-radius:20px;padding:1px 8px}
+  .leak-amt{margin-left:auto;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--text);white-space:nowrap}
+  .leak-desc{font-size:12px;color:var(--muted);padding:10px 13px 4px}
+  .leak-li{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 13px;border-top:1px solid var(--line-2)}
+  .leak-li a{color:var(--green);text-decoration:none;font-weight:600;white-space:nowrap}
+  @media(max-width:720px){#view-collections .kpis{grid-template-columns:repeat(2,1fr)}}
+  </style>
+  <section class="view" id="view-collections">
+    <div class="section-head">
+      <div><div class="eyebrow">Cash Recovery</div><h2>Collections Command Center</h2><div class="sub" id="ccSub">—</div></div>
+      <div class="period">
+        <div class="field"><label>Customer</label><select id="ccOper" onchange="renderCollectionsView()"><option value="">All customers</option></select></div>
+        <div class="field"><label>&nbsp;</label><button class="btn" onclick="downloadARStatement()" title="One AR statement for everything outstanding in the dashboard period" style="height:38px;white-space:nowrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>AR Statement</button></div>
+      </div>
+    </div>
+    <div class="kpis" id="ccKpis"></div>
+    <div class="grid2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-h"><h3>Aging of open receivables</h3><span class="eyebrow" id="ccAgeTot"></span></div>
+        <div class="card-b"><div class="bars" id="ccAging"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Statements of Account</h3><span class="eyebrow">Per customer · one-click PDF</span></div>
+        <div class="card-b"><div id="ccStmts"></div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-h"><div class="na-head"><h3>Revenue-Leak Guard</h3><span class="na-count" id="leakCount" style="background:var(--crit)">0</span></div><span class="eyebrow" id="leakAtRisk">—</span></div>
+      <div class="card-b"><div id="leakBody"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div class="na-head"><h3>Chase List</h3><span class="na-count" id="chaseCount" style="background:var(--warn-bg);color:var(--warn)">0</span></div><span class="eyebrow">Ranked by $ × age · escalation rung · what's blocking</span></div>
+      <div class="card-b"><div class="tablewrap"><table class="data" id="chaseTbl">
+        <thead><tr><th>Date</th><th>Invoice / PO Req</th><th>Operator – Location</th><th class="c">Unit</th><th class="r">Amount</th><th class="c">Age</th><th>Rung</th><th>Blocking</th><th class="r">Actions</th></tr></thead>
+        <tbody id="chaseBody"></tbody>
+      </table></div></div>
+    </div>
   </section>
 
   <section class="view" id="view-eq"></section>
@@ -693,7 +761,7 @@ function buildPeriod(){ var yrs=[...new Set(DATA.rows.map(function(x){return x.d
   var sel=document.getElementById("pYear"); var cur=sel.value;
   sel.innerHTML='<option value="">All years</option>'+yrs.map(function(y){return "<option>"+y+"</option>";}).join("");
   sel.value = cur || (yrs.indexOf(2026)>=0?"2026":(yrs[0]||"")); }
-function renderDash(){ renderKpis(); renderNeeds(); renderReady(); renderCollections(); renderUnitBars(); renderTrend(); renderArOps(); renderDesk(); if(document.getElementById("pipeCols")) renderPipeline(); }
+function renderDash(){ renderKpis(); renderNeeds(); renderReady(); renderCollections(); renderUnitBars(); renderTrend(); renderArOps(); renderDesk(); if(document.getElementById("pipeCols")) renderPipeline(); if(document.getElementById("chaseTbl")) renderCollectionsView(); }
 
 function renderKpis(){
   var r=dashRows(), total=r.reduce(function(a,x){return a+x.amount;},0);
@@ -829,6 +897,164 @@ function draftCollectionEmail(gi){
   toast("Reminder draft opened for "+g.name+" ("+g.rows.length+" invoice) — CC'd the AR list");
 }
 function closeCollections(){ document.getElementById("collectModal").classList.remove("open"); }
+
+/* ============================================================================
+   ALL-STAR UPGRADES — Collections Command Center, Revenue-Leak Guard,
+   Reminder Ladder & per-customer Statements of Account.
+   Everything below is computed from DATA.rows — no backend change required.
+============================================================================ */
+
+/* Escalation ladder: which rung an open item is on, by days since it was sent */
+function ladderRung(x){
+  var d=(x.sigAge!=null?x.sigAge:x.age)||0;
+  if(d>=30) return {n:4,label:"30-day",tone:"final",col:"var(--crit)"};
+  if(d>=21) return {n:3,label:"21-day",tone:"urgent",col:"#d2691e"};
+  if(d>=14) return {n:2,label:"14-day",tone:"firm",col:"var(--warn)"};
+  if(d>=REMIND_DAYS) return {n:1,label:"7-day",tone:"gentle",col:"var(--info)"};
+  return {n:0,label:"current",tone:"",col:"var(--muted)"};
+}
+function median(a){ if(!a.length)return 0; var s=a.slice().sort(function(x,y){return x-y;}); var m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+
+/* Open AR, optionally narrowed to one customer (the Customer filter on the view) */
+function openAR(){ var f=((document.getElementById("ccOper")||{}).value)||"";
+  return DATA.rows.filter(function(x){ return !isPaid(x) && (!f || String(x.operator||"—")===f); }); }
+function buildCcOper(){
+  var sel=document.getElementById("ccOper"); if(!sel) return; var cur=sel.value;
+  var ops=[...new Set(DATA.rows.filter(function(x){return !isPaid(x);}).map(function(x){return x.operator||"—";}))].sort();
+  sel.innerHTML='<option value="">All customers</option>'+ops.map(function(o){return '<option>'+esc(o)+'</option>';}).join("");
+  if(ops.indexOf(cur)>=0) sel.value=cur;
+}
+
+/* ---------- Feature 1: Collections Command Center ---------- */
+function renderCollectionsView(){
+  if(!document.getElementById("chaseTbl")) return;
+  buildCcOper();
+  var open=openAR(), tot=open.reduce(function(a,x){return a+x.amount;},0);
+  var over30=open.filter(function(x){return (x.age||0)>30;}), over30Amt=over30.reduce(function(a,x){return a+x.amount;},0);
+  var wsum=open.reduce(function(a,x){return a+x.amount*(x.age||0);},0), dso=tot?Math.round(wsum/tot):0;
+  var uns=open.filter(needsSig), sigSum=uns.reduce(function(a,x){return a+((x.sigAge!=null?x.sigAge:x.age)||0);},0), d2s=uns.length?Math.round(sigSum/uns.length):0;
+  var due=open.filter(function(x){return ladderRung(x).n>=1 && x.reminderSent!=="Yes";}), dueAmt=due.reduce(function(a,x){return a+x.amount;},0);
+  var K=[
+    {l:"Outstanding",v:money0(tot),s:"<b>"+open.length+"</b> open",c:"warn"},
+    {l:"Overdue 30+",v:money0(over30Amt),s:"<b>"+over30.length+"</b> invoice(s)",c:over30.length?"crit":""},
+    {l:"DSO",v:dso,s:"days · $-weighted",c:"info"},
+    {l:"Avg Days-to-Sign",v:d2s,s:"<b>"+uns.length+"</b> unsigned",c:""},
+    {l:"Reminders Due",v:due.length,s:money0(dueAmt)+" not nudged",c:due.length?"warn":""}
+  ];
+  document.getElementById("ccKpis").innerHTML=K.map(function(x){return '<div class="kpi '+x.c+'"><div class="k-label">'+x.l+'</div><div class="k-val num">'+x.v+'</div><div class="k-sub">'+x.s+'</div></div>';}).join("");
+  document.getElementById("ccSub").innerHTML="<b>"+money(tot)+"</b> outstanding · "+open.length+" open invoice(s) · DSO <b>"+dso+" days</b>";
+  /* aging of open receivables */
+  var buckets=["Current","1-30","31-60","61-90","90+"], bcol={"Current":"var(--green)","1-30":"var(--green-bright)","31-60":"var(--warn)","61-90":"#d2691e","90+":"var(--crit)"};
+  var bsum=buckets.map(function(b){return open.filter(function(x){return x.bucket===b;}).reduce(function(a,x){return a+x.amount;},0);});
+  var bcnt=buckets.map(function(b){return open.filter(function(x){return x.bucket===b;}).length;});
+  var mx=Math.max.apply(null,bsum.concat([1]));
+  document.getElementById("ccAgeTot").textContent=money0(tot)+" open";
+  document.getElementById("ccAging").innerHTML=buckets.map(function(b,i){
+    return '<div class="barrow" title="'+b+' — '+money(bsum[i])+' · '+bcnt[i]+' invoice(s)"><div class="bl">'+b+' <span class="sub" style="font-size:9.5px">('+bcnt[i]+')</span></div><div class="bartrack"><div class="barfill" style="width:'+Math.max(2,bsum[i]/mx*100)+'%;background:'+bcol[b]+'"></div></div><div class="bv">'+money0(bsum[i])+'</div></div>';
+  }).join("") || '<div class="sub" style="padding:8px 2px">Nothing open in this customer. 🎉</div>';
+  renderStatements(open);
+  renderLeakGuard();
+  renderChase(open);
+}
+function renderChase(open){
+  var list=open.map(function(x){ return {x:x, L:ladderRung(x), prio:x.amount*Math.max(1,(x.age||0))}; }).sort(function(a,b){return b.prio-a.prio;});
+  document.getElementById("chaseCount").textContent=list.length;
+  document.getElementById("chaseBody").innerHTML=list.map(function(o){
+    var x=o.x, L=o.L, ready=(x.poReq&&!x.inv&&x.poAssigned==="Yes");
+    var block = ready ? '<span class="chip-b" style="background:var(--info-bg);color:var(--info)">Ready to invoice</span>'
+      : needsPO(x) ? '<span class="chip-b" style="background:var(--info-bg);color:var(--info)">Needs PO</span>'
+      : needsSig(x) ? '<span class="chip-b" style="background:var(--warn-bg);color:var(--warn)">Needs signature</span>'
+      : '<span class="chip-b" style="background:var(--card-2);color:var(--muted)">Awaiting payment</span>';
+    var rung = L.n ? '<span class="rung" style="background:'+L.col+'">'+L.label+'</span>' : '<span class="sub">—</span>';
+    var sent = x.reminderSent==="Yes" ? ' <span class="sub" style="font-size:9.5px">· nudged</span>' : '';
+    var acts='';
+    if(ready) acts+='<button class="btn sm primary" onclick="buildInvoiceFromRow('+x.id+')">Invoice ▸</button> ';
+    acts+='<button class="btn sm" onclick="reminder('+x.id+')" title="Draft the next reminder in the ladder">Reminder</button> ';
+    acts+='<button class="btn sm" onclick="openRecord('+x.id+')" title="Open this record">Open</button>';
+    return '<tr><td>'+fmtDate(x.date)+'</td><td>'+esc(x.inv||x.poReq||"—")+'</td><td class="clip">'+esc(x.operator)+' – '+esc(x.location)+'</td><td class="c">'+esc(x.unit)+'</td><td class="r">'+money(x.amount)+'</td><td class="c">'+(x.age||0)+'d</td><td>'+rung+sent+'</td><td>'+block+'</td><td class="r" style="white-space:nowrap">'+acts+'</td></tr>';
+  }).join("") || '<tr><td colspan="9" class="sub" style="padding:14px 6px">Nothing outstanding. 🎉</td></tr>';
+}
+
+/* ---------- Feature 3: per-customer Statements of Account ---------- */
+function stmtGroups(open){
+  var inv=open.filter(function(x){return x.inv;}), g={}, order=[];
+  inv.forEach(function(x){ var k=x.operator||"—"; if(!g[k]){g[k]={op:k,rows:[],amt:0};order.push(k);} g[k].rows.push(x); g[k].amt+=x.amount; });
+  return order.map(function(k){return g[k];}).sort(function(a,b){return b.amt-a.amt;});
+}
+function renderStatements(open){
+  var groups=stmtGroups(open), el=document.getElementById("ccStmts"); if(!el) return;
+  if(!groups.length){ el.innerHTML='<div class="sub" style="padding:8px 2px">No open invoices to statement.</div>'; return; }
+  el.innerHTML=groups.map(function(g){
+    var oldest=g.rows.reduce(function(m,x){return Math.max(m,x.age||0);},0);
+    var op=String(g.op).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+    return '<div class="stmt-row"><div class="stmt-main"><b>'+esc(g.op)+'</b><div class="sub">'+g.rows.length+' open · '+money(g.amt)+' · oldest '+oldest+'d</div></div>'
+      +'<button class="btn sm" onclick="downloadCustomerStatement(\''+op+'\')" title="Statement of Account PDF for '+esc(g.op)+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>Statement</button></div>';
+  }).join("");
+}
+function buildCustomerStatement(op){
+  var rows=DATA.rows.filter(function(x){return x.inv&&!isPaid(x)&&String(x.operator||"—")===op;}).sort(function(a,b){return b.age-a.age;});
+  var c=CONFIG.COMPANY, tot=rows.reduce(function(a,x){return a+x.amount;},0);
+  var trs=rows.map(function(x,i){ return '<tr><td class="gut">'+(i+1)+'</td><td>'+fmtDate(x.date)+'</td><td>'+esc(x.inv||"—")+'</td><td>'+esc(x.location)+(x.po?' · PO '+esc(x.po):'')+'</td><td class="c">'+esc(x.unit)+'</td><td class="c">'+(x.age||0)+'d</td><td class="r">'+money(x.amount)+'</td></tr>'; }).join("");
+  return '<div class="doc"><div class="doc-top"><div class="doc-logo"><img src="logo.png" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'"><div class="wm" style="display:none"><div class="a">REVOLUTION</div><div class="b">ENERGY SERVICES</div><div class="c"><b>'+esc(c.division)+'</b><br>'+esc(c.addr)+' · '+esc(c.city)+'</div></div></div>'
+    +'<div class="doc-title"><div class="dt">STATEMENT OF ACCOUNT</div><div class="dn">'+esc(op)+' · outstanding invoices</div></div></div>'
+    +'<div class="doc-rule"></div>'
+    +'<div class="doc-secbar">OPEN INVOICES — '+esc(op).toUpperCase()+'</div>'
+    +'<table class="doc-tbl"><thead><tr><th class="gut"></th><th>Date</th><th>Invoice #</th><th>Location / PO</th><th class="c">Unit</th><th class="c">Age</th><th class="r">Amount</th></tr></thead><tbody>'+trs+'</tbody></table>'
+    +'<div class="doc-tot"><div class="box"><div class="row grand"><span class="l">TOTAL OUTSTANDING</span><span class="v">'+money(tot)+'</span></div></div></div>'
+    +'<div class="doc-footbar"><span>'+esc(c.name)+' · <b>'+esc(c.division)+'</b> · '+esc(c.addr)+', '+esc(c.city)+'</span><span class="r">'+esc(c.ar)+'<br>'+esc(c.email)+'</span></div></div>';
+}
+function downloadCustomerStatement(op){
+  var rows=DATA.rows.filter(function(x){return x.inv&&!isPaid(x)&&String(x.operator||"—")===op;});
+  if(!rows.length){ toast("No open invoices for "+op,"warn"); return; }
+  htmlToPdf(buildCustomerStatement(op), "Statement_"+String(op).replace(/[^\w.-]/g,"_")+"_"+iso(TODAY)+".pdf");
+}
+
+/* ---------- Feature 2: Revenue-Leak Guard ---------- */
+function computeLeaks(){
+  var rows=DATA.rows, out=[];
+  var a1=rows.filter(function(x){return x.poReq&&x.poAssigned==="Yes"&&!x.inv&&!isPaid(x);});
+  if(a1.length) out.push({key:"unbilled",sev:"crit",label:"Approved PO — not yet invoiced",desc:"Work with a customer PO in hand that has never been billed. Invoice these to convert them to cash.",items:a1,amount:a1.reduce(function(a,x){return a+x.amount;},0),jump:true});
+  var a2=rows.filter(function(x){return x.inv&&!isPaid(x)&&x.poAssigned!=="Yes";});
+  if(a2.length) out.push({key:"nopo",sev:"warn",label:"Invoiced without a Customer PO",desc:"Open invoices with no PO on file — at risk of being short-paid or disputed. Get the PO or confirm terms.",items:a2,amount:a2.reduce(function(a,x){return a+x.amount;},0),jump:true});
+  var a3=rows.filter(function(x){return x.signed==="Yes"&&!isPaid(x);});
+  if(a3.length) out.push({key:"signedopen",sev:"info",label:"Signed — ready to close as Paid",desc:"The customer signed but the row isn't marked Paid. Close these out so you stop chasing them.",items:a3,amount:a3.reduce(function(a,x){return a+x.amount;},0),jump:true});
+  var anyPdf=rows.some(function(x){return x.pdfUrl;});
+  if(anyPdf){ var a4=rows.filter(function(x){return x.inv&&!x.pdfUrl;}); if(a4.length) out.push({key:"nopdf",sev:"warn",label:"Invoice with no PDF filed",desc:"No saved PDF link — the invoice may never have been filed in Drive.",items:a4,amount:a4.reduce(function(a,x){return a+x.amount;},0),jump:true}); }
+  var seen={},dups={}; rows.forEach(function(x){ var n=String(x.inv||"").trim(); if(!n)return; if(seen[n])dups[n]=(dups[n]||1)+1; else seen[n]=1; });
+  var dupNums=Object.keys(dups);
+  if(dupNums.length){ var a5=rows.filter(function(x){return dups[String(x.inv||"").trim()];}); out.push({key:"dup",sev:"crit",label:"Duplicate invoice numbers",desc:"The same invoice # is on more than one row — a double-count or a numbering error. Reconcile them.",items:a5,amount:0,note:dupNums.length+" number(s)",jump:true}); }
+  var gaps=[]; ["50","51"].forEach(function(pfx){
+    var nums=[...new Set(rows.map(function(x){return String(x.inv||"").trim();}).filter(function(n){return n.length===5&&n.slice(0,2)===pfx&&/^\d+$/.test(n);}).map(Number))].sort(function(a,b){return a-b;});
+    if(nums.length<2)return;
+    for(var i=1;i<nums.length;i++){ var g=nums[i]-nums[i-1]; if(g>1&&g<=10){ for(var n=nums[i-1]+1;n<nums[i];n++) gaps.push(String(n)); } }   // only small skips between consecutive invoices — a big jump is a numbering discontinuity (different year/series), not a missing invoice
+  });
+  if(gaps.length){ var amts=rows.filter(function(x){return String(x.inv||"").length===5&&!isPaid(x);}).map(function(x){return x.amount;}).filter(function(v){return v>0;}); var est=Math.round(median(amts))*gaps.length;
+    var shown=gaps.slice(0,30), extra=gaps.length-shown.length, items=shown.map(function(g){return {inv:g,__gap:true};}); if(extra>0) items.push({inv:"+"+extra+" more gap(s)",__gap:true,__more:true});
+    out.push({key:"gap",sev:"warn",label:"Gaps in the invoice sequence",desc:"Invoice numbers skipped between consecutive invoices — each could be a missing or unlogged invoice (or a legitimately voided one). Review the "+gaps.length+" gap(s); the estimate assumes they are real invoices at the median amount.",items:items,count:gaps.length,amount:est,estimated:true}); }
+  var a7=rows.filter(function(x){return !isPaid(x)&&(x.age||0)>60;});
+  if(a7.length) out.push({key:"stuck",sev:"crit",label:"Stuck 60+ days",desc:"Open receivables aging past 60 days — escalate to a firm reminder or a call now.",items:a7,amount:a7.reduce(function(a,x){return a+x.amount;},0),jump:true});
+  return out;
+}
+function renderLeakGuard(){
+  var leaks=computeLeaks(), el=document.getElementById("leakBody"); if(!el) return;
+  document.getElementById("leakCount").textContent=leaks.length;
+  var riskKeys={unbilled:1,nopo:1,nopdf:1,stuck:1}, idset={}, sum=0;   // hard, quantifiable exposure only — sequence gaps are a review flag, not counted here
+  leaks.forEach(function(L){ if(riskKeys[L.key]) L.items.forEach(function(x){ if(x.id!=null&&!idset[x.id]){idset[x.id]=1; sum+=x.amount||0;} }); });
+  var risk=document.getElementById("leakAtRisk"); if(risk) risk.innerHTML=leaks.length? ("<b>"+money0(sum)+"</b> at risk / recoverable") : "All clear";
+  if(!leaks.length){ el.innerHTML='<div class="sub" style="padding:8px 2px">No leaks detected — every approved PO is invoiced, every open invoice has a PO, no duplicates or sequence gaps, nothing stuck. 🎉</div>'; return; }
+  el.innerHTML=leaks.map(function(L){
+    var sevcol=L.sev==="crit"?"var(--crit)":(L.sev==="warn"?"var(--warn)":"var(--info)");
+    var amt=L.amount?('<b>'+money0(L.amount)+(L.estimated?' est.':'')+'</b>'):(L.note||'');
+    var cnt=(L.count!=null?L.count:L.items.length);
+    var lis=L.items.map(function(x){
+      if(x.__more) return '<div class="leak-li"><span class="sub">'+esc(x.inv)+'</span></div>';
+      if(x.__gap) return '<div class="leak-li"><span>Invoice #'+esc(x.inv)+' — not present in the tracker</span></div>';
+      var jump=(L.jump&&x.id!=null)?' <a href="#" onclick="switchView(\'dashboard\');openRecord('+x.id+');return false;">open ▸</a>':'';
+      return '<div class="leak-li"><span>'+esc(x.inv||x.poReq||"—")+' · '+esc(x.operator)+' – '+esc(x.location)+(x.amount?' · '+money(x.amount):'')+(x.age!=null?' · '+x.age+'d':'')+'</span>'+jump+'</div>';
+    }).join("");
+    return '<details class="leak"><summary><span class="leak-dot" style="background:'+sevcol+'"></span><b>'+esc(L.label)+'</b><span class="leak-cnt">'+cnt+'</span><span class="leak-amt">'+amt+'</span></summary><div class="leak-desc">'+esc(L.desc)+'</div>'+lis+'</details>';
+  }).join("");
+}
 function renderUnitBars(){
   var r=dashRows();
   var u755=r.filter(function(x){return x.unit==="755";}).reduce(function(a,x){return a+x.amount;},0);
@@ -1067,12 +1293,12 @@ function renderBuilder(v){
     +'</div><div class="preview-col"><div class="preview-head">'
     +'<div class="seg"><button class="'+(s.mode==='PO REQUEST'?'on':'')+'" onclick="setMode2(\''+v+'\',\'PO REQUEST\')">PO Request</button><button class="'+(s.mode==='INVOICE'?'on':'')+'" onclick="setMode2(\''+v+'\',\'INVOICE\')">Invoice</button></div>'
     +'<div class="pv-actions">'
-    +'<button class="btn primary" onclick="generate(\''+v+'\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>Generate '+(s.mode==='PO REQUEST'?'PO':'Invoice')+'</button>'
-    +'<button class="btn" onclick="openModal(\''+v+'\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Preview</button>'
-    +'<button class="btn" onclick="downloadPdf(\''+v+'\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download PDF</button>'
-    +'<button class="btn dark" onclick="emailDraft(\''+v+'\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Email Draft</button>'
-    +'<button class="btn" onclick="clearBuilder(\''+v+'\')" title="Clear the form to start a new document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/></svg>New / Clear</button>'
-    +'<button class="btn save" onclick="saveBuilder(\''+v+'\')" title="Save changes to this document" style="background:#0f6d33;color:#fff;border-color:#0f6d33"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Save</button>'
+    +'<button class="btn primary" onclick="generate(\''+v+'\')" title="Create the '+(s.mode==='PO REQUEST'?'PO Request':'Invoice')+' and save it to the sheet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>Generate '+(s.mode==='PO REQUEST'?'PO':'Invoice')+'</button>'
+    +'<button class="btn" onclick="openModal(\''+v+'\')" title="Preview the document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>Preview</button>'
+    +'<button class="btn" onclick="downloadPdf(\''+v+'\')" title="Download the PDF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download PDF</button>'
+    +'<button class="btn dark" onclick="emailDraft(\''+v+'\')" title="Draft the email with the PDF attached"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Email Draft</button>'
+    +'<button class="btn info" onclick="saveBuilder(\''+v+'\')" title="Save changes to this document on the sheet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Save</button>'
+    +'<button class="btn danger" onclick="clearBuilder(\''+v+'\')" title="Clear the form to start a new document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/></svg>New / Clear</button>'
     +'</div></div><div class="paper-frame"><div id="doc-'+v+'"></div></div></div></div>';
   document.getElementById("view-"+v).innerHTML=html;
   if(!s.lines.length) addLine(v,true);
@@ -1373,10 +1599,19 @@ async function reminder(id){
   var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
   var rec=contactForRow(x)||{email:""}; var to=rec.email, cc=EMAIL_CC.reminder.filter(function(e){return e.toLowerCase()!==(to||"").toLowerCase();});
   var unit=x.unit==="755"?"Equipment Service (755)":"Operations (765)";
-  var subj="REMINDER - "+x.operator+" - "+x.location+" - "+x.disc+" - "+unit+" - Fleet # "+x.fleet+" - Invoice # "+x.inv;
-  var ask = needsSig(x) ? "please review and SIGN AND RETURN the attached invoice" : "please assign a PO to the attached invoice";
-  var body="Following up on the invoice below — "+ask+".\n\nBilling Unit : "+(x.unit==="755"?"Evolution Well Services - 755":"Evolution Well Services Operating LLC - 765")
-    +"\n\nInvoice #: "+x.inv+"\n"+x.operator+" - "+x.location+" - Fleet # "+x.fleet+"\nAmount: "+money(x.amount)+"\nInvoice date: "+fmtDate(x.date)+" ("+x.age+" days)\n\nPlease let me know if you have any questions.";
+  var docLabel=x.inv?("Invoice # "+x.inv):("PO Request "+(x.poReq||""));
+  /* Escalation ladder — tone sharpens with how long it's been sent (7 / 14 / 21 / 30 days) */
+  var L=ladderRung(x), d=(x.sigAge!=null?x.sigAge:x.age)||0, T;
+  if(L.n>=4)      T={tag:"FINAL NOTICE",         head:"*** FINAL NOTICE — PLEASE SIGN AND RETURN ***\n\n", lead:"This invoice is now "+d+" days outstanding. This is a final notice before the account is escalated to collections. "};
+  else if(L.n===3)T={tag:"URGENT — 3RD REQUEST", head:"URGENT — THIRD REQUEST\n\n",                        lead:"This invoice is now "+d+" days outstanding and requires immediate attention. "};
+  else if(L.n===2)T={tag:"SECOND REMINDER",       head:"",                                                  lead:"Second reminder — the item below is "+d+" days outstanding. "};
+  else            T={tag:"REMINDER",              head:"",                                                  lead:"Following up on the item below. "};
+  var askCap = (!x.inv && needsPO(x)) ? "Please provide a Customer PO for the PO Request below so we can invoice."
+             : needsSig(x) ? "Please review and SIGN AND RETURN the attached invoice."
+             : "Please assign a PO to the attached invoice.";
+  var subj=T.tag+" - "+x.operator+" - "+x.location+" - "+x.disc+" - "+unit+" - Fleet # "+x.fleet+" - "+docLabel;
+  var body=T.head+T.lead+askCap+"\n\nBilling Unit : "+(x.unit==="755"?"Evolution Well Services - 755":"Evolution Well Services Operating LLC - 765")
+    +"\n\n"+docLabel+"\n"+x.operator+" - "+x.location+" - Fleet # "+x.fleet+"\nAmount: "+money(x.amount)+"\nInvoice date: "+fmtDate(x.date)+" ("+x.age+" days)\n\nPlease let me know if you have any questions.";
   body=withSig(body);
   var attached=false;
   if(CONFIG.GOOGLE_CLIENT_ID && x.pdfUrl){                         // attach the saved invoice PDF from Drive when available (only if it passes an integrity check)
@@ -1386,8 +1621,8 @@ async function reminder(id){
   x.reminderSent="Yes";
   if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:x.inv,poReq:x.poReq,field:"reminder",value:"Yes"}}).catch(function(){});
   renderDash(); renderTracker();
-  toast(attached ? "Reminder draft created in Gmail with the invoice PDF attached — open Gmail → Drafts" : "Reminder draft opened for #"+x.inv+" (Fleet #"+x.fleet+")");
-  ackPopup("Reminder Created", "A reminder draft for Invoice # "+x.inv+" (Fleet # "+x.fleet+") has been "+(attached?"created in Gmail with the invoice PDF attached.  Open Gmail → Drafts to send.":"opened in a compose window.  Review and send."));
+  toast(attached ? T.tag+" draft created in Gmail with the PDF attached — open Gmail → Drafts" : T.tag+" draft opened for "+docLabel+" (Fleet #"+x.fleet+")");
+  ackPopup((L.n>=2?"Escalation Reminder — "+T.tag:"Reminder Created"), "A "+T.tag.toLowerCase()+" draft for "+docLabel+" (Fleet # "+x.fleet+") has been "+(attached?"created in Gmail with the invoice PDF attached.  Open Gmail → Drafts to send.":"opened in a compose window.  Review and send."));
 }
 async function fetchDrivePdf(pdfUrl){
   var m=String(pdfUrl||"").match(/[-\w]{25,}/); if(!m) return null;   // extract the Drive file id from the saved URL
@@ -1437,7 +1672,7 @@ function deleteEntry(id){
 }
 
 /* ============================ NAV / THEME / TOASTS ============================ */
-function switchView(v){ document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.dataset.view===v);}); document.querySelectorAll(".view").forEach(function(x){x.classList.remove("active");}); document.getElementById("view-"+v).classList.add("active"); window.scrollTo({top:0,behavior:"smooth"}); }
+function switchView(v){ document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.dataset.view===v);}); document.querySelectorAll(".view").forEach(function(x){x.classList.remove("active");}); document.getElementById("view-"+v).classList.add("active"); if(v==="collections"&&document.getElementById("chaseTbl")) renderCollectionsView(); window.scrollTo({top:0,behavior:"smooth"}); }
 document.querySelectorAll(".tab").forEach(function(t){t.addEventListener("click",function(){switchView(t.dataset.view);});});
 function toggleTheme(){ var r=document.documentElement,cur=r.getAttribute("data-theme"),sysDark=window.matchMedia("(prefers-color-scheme:dark)").matches; var next; if(cur==="dark")next="light"; else if(cur==="light")next="dark"; else next=sysDark?"light":"dark"; r.setAttribute("data-theme",next); try{localStorage.setItem("revo-theme",next);}catch(e){} }
 (function(){ try{ var t=localStorage.getItem("revo-theme"); if(t) document.documentElement.setAttribute("data-theme",t); }catch(e){} })();
