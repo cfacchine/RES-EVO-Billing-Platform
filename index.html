@@ -684,7 +684,10 @@ function unitFor(o){
   var d=String(o&&o.disc||"").toLowerCase();
   if(/rig\s*up|rig\s*down|roustabout|operation|logistic|haul|transport|swab|coil|pump\s*down|water\s*transfer|rig\s*move|labor/.test(d)) return "765";
   if(/equipment/.test(d)) return "755";
-  return (o&&o.unit==="765")?"765":(o&&o.unit==="755")?"755":unitFromInv(iv);
+  var su=String((o&&o.unit)||"").toLowerCase();               // Billing Unit text — accepts "765"/"755", "OPERATING 765"/"SERVICE 755", or the long "Evolution…(765)" form
+  if(su.indexOf("765")>=0||su.indexOf("operat")>=0) return "765";
+  if(su.indexOf("755")>=0||su.indexOf("service")>=0||su.indexOf("equip")>=0) return "755";
+  return unitFromInv(iv);
 }
 function yn(v){ v=String(v||"").trim().toUpperCase(); return (v==="X"||v.charAt(0)==="Y"||v==="TRUE")?"Yes":"No"; }
 function parseNotes(n){ n=String(n||""); var fleet=""; var fm=n.match(/Fleet\s*#\s*(\d+)/i); if(fm)fleet=fm[1];
