@@ -663,7 +663,7 @@ const SAMPLE = [
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
 const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl","start","end"];
-const TODAY = new Date("2026-08-22T00:00:00");
+const TODAY = (function(){ var d=new Date(); d.setHours(0,0,0,0); return d; })();   // live "today" (local midnight): Days Outstanding = today − Invoice Date (from the Billing Tracker)
 const REMIND_DAYS = 7;   // remind on invoices still open this many days after being sent for signature
 let DATA = { rows: [] };
 let LIVE = false;
