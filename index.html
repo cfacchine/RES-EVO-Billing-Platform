@@ -1706,16 +1706,42 @@ async function reminder(id){
   var body=T.head+T.lead+askCap+"\n\nBilling Unit : "+(x.unit==="755"?"Evolution Well Services - 755":"Evolution Well Services Operating LLC - 765")
     +"\n\n"+docLabel+"\n"+x.operator+" - "+x.location+" - Fleet # "+x.fleet+"\nAmount: "+money(x.amount)+"\nInvoice date: "+fmtDate(x.date)+" ("+x.age+" days)\n\nPlease let me know if you have any questions.";
   body=withSig(body);
-  var attached=false;
-  if(CONFIG.GOOGLE_CLIENT_ID && x.pdfUrl){                         // attach the saved invoice PDF from Drive when available (only if it passes an integrity check)
-    try{ toast("Attaching the saved PDF from Drive…"); var blob=await fetchDrivePdf(x.pdfUrl); var chk=blob?await _pdfBytesOk(blob):{ok:false}; if(blob&&chk.ok){ await gmailCreateDraft(to,cc,subj,body,blob,"Invoice_"+(x.inv||x.poReq)+".pdf"); attached=true; } }catch(e){}
+  var attached=false, fname=(x.inv?"Invoice_":"PO_Request_")+(x.inv||x.poReq||"doc")+".pdf";
+  // also attach the approved customer-PO PDF when the Inbox auto-file has stored it on this row
+  var extra=null;
+  if(CONFIG.GOOGLE_CLIENT_ID && x.poPdf){ try{ var pob=await fetchDrivePdf(x.poPdf); var poc=pob?await _pdfBytesOk(pob):{ok:false}; if(pob&&poc.ok) extra={blob:pob,fname:"Approved_PO_"+((x.po||x.poReq||"").toString().replace(/[^\w.-]/g,"_"))+".pdf"}; }catch(e){} }
+  // 1) the exact saved PDF from Drive, when a link is on file
+  if(CONFIG.GOOGLE_CLIENT_ID && x.pdfUrl){
+    try{ toast("Attaching the saved PDF from Drive…"); var dblob=await fetchDrivePdf(x.pdfUrl); var dchk=dblob?await _pdfBytesOk(dblob):{ok:false}; if(dblob&&dchk.ok){ await gmailCreateDraft(to,cc,subj,body,dblob,fname,extra); attached=true; } }catch(e){}
+  }
+  // 2) fallback: rebuild the document from the record's line items — no saved Drive link needed
+  if(!attached && CONFIG.GOOGLE_CLIENT_ID){
+    var vv=(x.unit==="765")?"ops":"eq";
+    var mem=loadRec(x.poReq)||loadRec(x.inv), recc=RECORDS[x.poReq]||RECORDS[x.inv];
+    var memLines=mem&&(mem.rawLines||mem.lines);
+    var lines=(memLines&&memLines.length)?memLines:((recc&&recc.lines&&recc.lines.length)?recc.lines:((x.lineItems&&x.lineItems.length)?x.lineItems:null));
+    if(lines){
+      var snap=JSON.parse(JSON.stringify(state[vv]));
+      try{ toast("Rebuilding the "+(x.inv?"invoice":"PO request")+" PDF…");
+        var s=state[vv];
+        s.mode=x.inv?"INVOICE":"PO REQUEST"; s.fleet=x.fleet||""; s.operator=x.operator||""; s.location=x.location||""; s.disc=x.disc||"";
+        s.po=x.po||""; s.poReq=x.poReq||""; s.inv=x.inv||"";
+        s.notes=(mem&&mem.notes)||x.notes||""; s.start=(mem&&mem.start)||x.start||""; s.end=(mem&&mem.end)||x.end||"";
+        s.lines=lines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};});
+        if(mem&&mem.contact){ s.contact=mem.contact; if(mem.contactInfo)s.contactInfo=mem.contactInfo; } else { var cr=contactForRow(x); if(cr){ s.contact=cr.name||s.contact; s.contactInfo=[cr.phone,cr.email].filter(Boolean).join("  ·  "); } }
+        applyContact(vv,s.contact);
+        var pdf=await makeDocPdf(vv);
+        if(pdf.ok&&pdf.blob){ await gmailCreateDraft(to,cc,subj,body,pdf.blob,fname,extra); attached=true; }
+      }catch(e){}
+      finally{ state[vv]=snap; try{ renderBuilder(vv); }catch(e){} }
+    }
   }
   if(!attached) openGmail(to,cc,subj,body);
   x.reminderSent="Yes";
   if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:x.inv,poReq:x.poReq,field:"reminder",value:"Yes"}}).catch(function(){});
   renderDash(); renderTracker();
   toast(attached ? T.tag+" draft created in Gmail with the PDF attached — open Gmail → Drafts" : T.tag+" draft opened for "+docLabel+" (Fleet #"+x.fleet+")");
-  ackPopup((L.n>=2?"Escalation Reminder — "+T.tag:"Reminder Created"), "A "+T.tag.toLowerCase()+" draft for "+docLabel+" (Fleet # "+x.fleet+") has been "+(attached?"created in Gmail with the invoice PDF attached.  Open Gmail → Drafts to send.":"opened in a compose window.  Review and send."));
+  ackPopup((L.n>=2?"Escalation Reminder — "+T.tag:"Reminder Created"), "A "+T.tag.toLowerCase()+" draft for "+docLabel+" (Fleet # "+x.fleet+") has been "+(attached?"created in Gmail with the "+(x.inv?"invoice":"PO request")+" PDF attached.  Open Gmail → Drafts to send.":"opened in a compose window.  No saved PDF or line items were on file to rebuild the document, so nothing could be attached — open the record in the builder and use “Download PDF” to attach it."));
 }
 async function fetchDrivePdf(pdfUrl){
   var m=String(pdfUrl||"").match(/[-\w]{25,}/); if(!m) return null;   // extract the Drive file id from the saved URL
