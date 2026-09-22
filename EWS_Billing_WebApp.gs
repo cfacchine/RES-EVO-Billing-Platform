@@ -27,7 +27,7 @@ var SCH_755  = 'Billing Schedule 755', SCH_765 = 'Billing Schedule 765', DIRECTO
 var LISTS_TAB= 'Lists';                                          // dropdown source: A=Operators, B=Category(Disc)
 var LOG_TAB  = 'Access Log';                                     // sign-in audit log: Timestamp | Email | Name | Browser
 var EMAIL_TAB= 'Email Lists';                                    // CC recipients per doc type: A=PO Request, B=Invoice, C=Reminder, D=Collections
-var DRIVE_ROOT = '1uMR9dqS52Z4ZqUAqmIaLzUqLhpmmtAZY';           // shared "EWS Billing" folder — PDFs saved here (Unit/Year/Month/Type)
+var DRIVE_ROOT = '1U3dQyP_Il3aQzAcmBr5NyNzPVLmprqGJ';           // cfacchine-owned "EWS Billing" folder (sections: Invoice Request / PO Assigned / Invoice Signed / PO Requests). Was 1uMR9dqS52Z4ZqUAqmIaLzUqLhpmmtAZY (personal-account folder).
 
 /* Inbox auto-file (#1): scans Gmail for customer replies with a PDF, files it to your Drive by year
    (approved PO → "PO Assigned"/Year, signed invoice → "Invoice Signed"/Year), links it on the tracker
