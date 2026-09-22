@@ -267,17 +267,23 @@ function seedEmailLists(){ emailListsSheet_(); return 'Email Lists tab is ready 
 /* ============================ GOOGLE DRIVE (save each PO Request / Invoice PDF) ============================ */
 var MONTHS_=['January','February','March','April','May','June','July','August','September','October','November','December'];
 function folderChild_(parent,name){ var it=parent.getFoldersByName(name); return it.hasNext()?it.next():parent.createFolder(name); }
+function cleanName_(s){ return String(s==null?'':s).replace(/[\\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').trim(); }
+/* Filenames — the leading ID is the match key that links the file back to its tracker row:
+   PO Request     : "<PO Request #> - <Operator> - <Location>.pdf"   e.g. "EWS-POR-000026 - Ascent - Charley Pad.pdf"
+   Invoice        : "Invoice <Invoice #> - <Operator> - <Location>.pdf"   e.g. "Invoice 50494 - Ascent - Charley Pad.pdf" */
+function pdfFileName_(p,action){
+  var op=cleanName_(p.operator), loc=cleanName_(p.location), tail=(op?' - '+op:'')+(loc?' - '+loc:'');
+  if(action==='invoice') return cleanName_('Invoice '+(p.inv||p.poReq||'doc')+tail)+'.pdf';
+  return cleanName_((p.poReq||'doc')+tail)+'.pdf';
+}
 function savePdf_(p,action){
   if(!p.pdfB64) return '';
   try{
     var root=DriveApp.getFolderById(DRIVE_ROOT);
-    var unit=(String(p.unit)==='765')?'765 Operations':'755 Equipment Service';
     var d=p.date?new Date(p.date):new Date(); if(isNaN(d.getTime())) d=new Date();
-    var mon=('0'+(d.getMonth()+1)).slice(-2)+'-'+MONTHS_[d.getMonth()];
-    var type=(action==='invoice')?'Invoices':'PO Requests';
-    var folder=folderChild_(folderChild_(folderChild_(folderChild_(root,unit),String(d.getFullYear())),mon),type);
-    var num=(action==='invoice')?(p.inv||p.poReq||'doc'):(p.poReq||'doc');
-    var fname=((action==='invoice')?'Invoice_':'PO_Request_')+num+'.pdf';
+    var top=(action==='invoice')?'Invoice Request':'PO Requests';                 // the manual EWS Billing folders
+    var folder=folderChild_(folderChild_(root,top),String(d.getFullYear()));       // EWS Billing / <top> / <Year>
+    var fname=pdfFileName_(p,action);
     var ex=folder.getFilesByName(fname); while(ex.hasNext()){ ex.next().setTrashed(true); }   // keep one current version
     var file=folder.createFile(Utilities.newBlob(Utilities.base64Decode(p.pdfB64),'application/pdf',fname));
     return file.getUrl();
@@ -663,7 +669,7 @@ function scanInbox_(preview){
         if(!kind || rowIdx<0) return;
         var year=String((msg.getDate()||new Date()).getFullYear());
         var folderName=(kind==='signed')?INBOX.SIGNED_FOLDER:INBOX.POASSIGNED_FOLDER;
-        var fname=((kind==='signed')?'Signed_Invoice_':'Approved_PO_')+docNo+'.pdf';
+        var fname=(kind==='signed')?('Invoice '+docNo+' - SIGNED.pdf'):(docNo+' - Approved PO.pdf');
         if(preview){ filed.push(fname+'  →  '+folderName+' / '+year+'   (from '+String(msg.getFrom()).replace(/.*</,'').replace('>','')+')'); return; }
         var folder=folderChild_(folderChild_(root,folderName),year);
         var ex=folder.getFilesByName(fname); while(ex.hasNext()) ex.next().setTrashed(true);
@@ -678,7 +684,7 @@ function scanInbox_(preview){
   return (preview?'WOULD file ':'Filed ')+filed.length+' PDF(s)'+(filed.length?':\n • '+filed.join('\n • '):'.')+(preview?'\n\n(preview only — nothing written)':'');
 }
 function ensureInboxCols_(sh,hr){
-  var need=[['po assigned pdf','PO Assigned PDF'],['signed invoice pdf','Signed Invoice PDF'],['inbox','Inbox']];
+  var need=[['po request pdf','PO Request PDF'],['invoice pdf','Invoice PDF'],['po assigned pdf','PO Assigned PDF'],['signed invoice pdf','Signed Invoice PDF'],['inbox','Inbox']];
   var hdrs=sh.getRange(hr+1,1,1,sh.getLastColumn()).getValues()[0].map(function(x){return String(x).trim().toLowerCase();});
   need.forEach(function(p){ if(hdrs.indexOf(p[0])<0){ sh.getRange(hr+1,sh.getLastColumn()+1).setValue(p[1]); } });
   return hdr_(sh.getRange(hr+1,1,1,sh.getLastColumn()).getValues()[0]);
@@ -689,3 +695,43 @@ function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh
 function inboxMarkSeen_(ss,id,label){ var sh=ss.getSheetByName(INBOX.LOG_TAB);
   if(!sh){ sh=ss.insertSheet(INBOX.LOG_TAB); sh.getRange(1,1,1,3).setValues([['Message Id','Filed','When']]); sh.setFrozenRows(1); }
   sh.appendRow([id,label,new Date()]); }
+
+/* RE-RUNNABLE: index the four EWS Billing folders (and their Year subfolders), match each PDF to a
+   tracker row by the ID in its filename, and write the Drive link into that row's PDF column. Pulls in
+   files the system saved AND anything you filed by hand. Run it from the editor (Run ▸ linkDriveFiles)
+   after adding PDFs. Naming that matches: PO folders must contain the PO Request # (EWS-POR-…),
+   invoice folders the 5-digit invoice # (e.g. 50494). */
+function linkDriveFiles(){
+  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB);
+  if(!sh) return 'Billing Tracker tab not found.';
+  var hr=trackerHeaderRow_(sh.getRange(1,1,Math.min(sh.getLastRow(),15),sh.getLastColumn()).getValues()); if(hr<0) hr=0;
+  var m=ensureInboxCols_(sh,hr);                                       // ensure the four PDF-link columns exist
+  var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
+  var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), byInv={}, byPoReq={};
+  for(var r=hr+1;r<vals.length;r++){
+    var inv=String(iInv>=0?vals[r][iInv]:'').trim(); if(inv) byInv[inv]=r;
+    var pr=String(iPoReq>=0?vals[r][iPoReq]:'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^EWSOPOR/,'EWSPOR'); if(pr) byPoReq[pr]=r;
+  }
+  var root=DriveApp.getFolderById(DRIVE_ROOT), linked=0, scanned=0, unmatched=[];
+  var jobs=[ {folder:'PO Requests',col:A.poReqPdf,key:'po'}, {folder:'Invoice Request',col:A.invPdf,key:'inv'},
+             {folder:'PO Assigned',col:A.poPdf,key:'po'},  {folder:'Invoice Signed',col:A.sgnPdf,key:'inv'} ];
+  jobs.forEach(function(job){
+    var it=root.getFoldersByName(job.folder); if(!it.hasNext()) return; var col=col_(m,job.col); if(col<0) return;
+    eachPdf_(it.next(),function(file){
+      scanned++; var name=file.getName(), rowIdx=-1;
+      if(job.key==='inv'){ var mi=name.match(/(5[01]\d{3})(?!\d)/); if(mi && byInv[mi[1]]!=null) rowIdx=byInv[mi[1]]; }
+      else { var mp=name.match(/EWSO?-?POR-?\d+/i); if(mp){ var k=mp[0].toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^EWSOPOR/,'EWSPOR'); if(byPoReq[k]!=null) rowIdx=byPoReq[k]; } }
+      if(rowIdx<0){ if(unmatched.length<25) unmatched.push(job.folder+': '+name); return; }
+      var cur=String(vals[rowIdx][col]||''); if(cur.indexOf(file.getId())>=0) return;   // already linked
+      sh.getRange(rowIdx+1,col+1).setValue(file.getUrl()); vals[rowIdx][col]=file.getUrl(); linked++;
+    });
+  });
+  var msg='Linked '+linked+' of '+scanned+' PDF(s) across the four folders.';
+  if(unmatched.length) msg+='\n\nNo tracker match (check the ID in the filename):\n • '+unmatched.join('\n • ');
+  return msg;
+}
+/* walk a folder + its immediate (Year) subfolders, calling cb for each PDF */
+function eachPdf_(folder,cb){
+  var f=folder.getFilesByType(MimeType.PDF); while(f.hasNext()) cb(f.next());
+  var subs=folder.getFolders(); while(subs.hasNext()){ var sf=subs.next().getFilesByType(MimeType.PDF); while(sf.hasNext()) cb(sf.next()); }
+}
