@@ -744,7 +744,8 @@ async function loadData(manual){
     try{
       var j=await fetch(CONFIG.EXEC_URL+"?action=summary").then(function(r){return r.json();});
       if(j&&j.rows){ LIVE_PAID = !!(j.rows.length && Object.prototype.hasOwnProperty.call(j.rows[0],"paid")); DATA.rows=toRows(j.rows.map(function(r){return COLS.map(function(c){return r[c];});}));
-        LIVE=true; _failN=0; setStatus("is-live","Live · sheet"); demoOff(); await loadLiveConfig(); renderAll(); _loading=false;
+        LIVE=true; _failN=0; setStatus("is-live","Live · sheet"); demoOff(); renderAll(); _loading=false;   // paint the sheet immediately — don't block the dashboard on the config fetches
+        loadLiveConfig().then(function(){ renderAll(); });   // rates / directory / operator+disc lists / CC lists load in parallel in the background, then one refresh
         if(manual) toast("Refreshed from the live sheet"); return; }
       throw 0;
     }catch(e){
@@ -759,18 +760,18 @@ async function loadData(manual){
   if(!DATA.rows.length) renderAll();
 }
 async function loadLiveConfig(){
-  try{ var sc=await fetch(CONFIG.EXEC_URL+"?action=schedule").then(function(r){return r.json();});
-    if(sc&&Array.isArray(sc['755'])&&sc['755'].length) RATES['755']=sc['755'];
-    if(sc&&Array.isArray(sc['765'])&&sc['765'].length) RATES['765']=sc['765']; }catch(e){}
-  try{ var dr=await fetch(CONFIG.EXEC_URL+"?action=directory").then(function(r){return r.json();});
-    if(dr&&dr.fleets&&dr.fleets.length){ DIRECTORY.length=0; dr.fleets.forEach(function(f){DIRECTORY.push(f);}); } }catch(e){}
-  try{ var ls=await fetch(CONFIG.EXEC_URL+"?action=lists").then(function(r){return r.json();});
-    var cl=function(a){ var o=[],seen={}; (a||[]).forEach(function(x){ var t=operClean(x), k=t.toLowerCase(); if(t&&!(k in seen)){ seen[k]=1; o.push(t); } }); return o; };
-    var ops=cl(ls&&ls.operators), dsc=cl(ls&&ls.disc);
-    if(ops.length) OPERATORS=ops;
-    if(dsc.length) DISC=dsc; }catch(e){}
-  try{ var em=await fetch(CONFIG.EXEC_URL+"?action=emails").then(function(r){return r.json();});   // CC lists from the Email Lists tab
-    if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
+  var base=CONFIG.EXEC_URL;
+  var gj=function(a){ return fetch(base+"?action="+a).then(function(r){return r.json();}).catch(function(){return null;}); };
+  var r=await Promise.all([gj("schedule"),gj("directory"),gj("lists"),gj("emails")]);   // 4 config calls in parallel — one round-trip, not four
+  var sc=r[0], dr=r[1], ls=r[2], em=r[3];
+  try{ if(sc&&Array.isArray(sc['755'])&&sc['755'].length) RATES['755']=sc['755'];
+       if(sc&&Array.isArray(sc['765'])&&sc['765'].length) RATES['765']=sc['765']; }catch(e){}
+  try{ if(dr&&dr.fleets&&dr.fleets.length){ DIRECTORY.length=0; dr.fleets.forEach(function(f){DIRECTORY.push(f);}); } }catch(e){}
+  try{ var cl=function(a){ var o=[],seen={}; (a||[]).forEach(function(x){ var t=operClean(x), k=t.toLowerCase(); if(t&&!(k in seen)){ seen[k]=1; o.push(t); } }); return o; };
+       var ops=cl(ls&&ls.operators), dsc=cl(ls&&ls.disc);
+       if(ops.length) OPERATORS=ops;
+       if(dsc.length) DISC=dsc; }catch(e){}
+  try{ if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
 }
 function setStatus(state,text){
   var el=document.getElementById("dataStatus");
