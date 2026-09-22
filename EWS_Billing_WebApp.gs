@@ -707,10 +707,13 @@ function linkDriveFiles(){
   var hr=trackerHeaderRow_(sh.getRange(1,1,Math.min(sh.getLastRow(),15),sh.getLastColumn()).getValues()); if(hr<0) hr=0;
   var m=ensureInboxCols_(sh,hr);                                       // ensure the four PDF-link columns exist
   var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
-  var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), byInv={}, byPoReq={};
+  var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), iPo=col_(m,A.po), byInv={}, byPoReq={}, byCustPo={};
+  var norm_=function(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); };
   for(var r=hr+1;r<vals.length;r++){
     var inv=String(iInv>=0?vals[r][iInv]:'').trim(); if(inv) byInv[inv]=r;
-    var pr=String(iPoReq>=0?vals[r][iPoReq]:'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^EWSOPOR/,'EWSPOR'); if(pr) byPoReq[pr]=r;
+    var pr=norm_(iPoReq>=0?vals[r][iPoReq]:'').replace(/^EWSOPOR/,'EWSPOR'); if(pr) byPoReq[pr]=r;
+    var cp=norm_(iPo>=0?vals[r][iPo]:'');                                     // customer PO # (e.g. EWSO-PO-2518)
+    if(/^EWSO?PO\d+$/.test(cp)){ (byCustPo[cp]=byCustPo[cp]||[]).push(r); }   // one customer PO can cover several invoices
   }
   var root=DriveApp.getFolderById(DRIVE_ROOT), linked=0, scanned=0, unmatched=[];
   var jobs=[ {folder:'PO Requests',col:A.poReqPdf,key:'po'}, {folder:'Invoice Request',col:A.invPdf,key:'inv'},
@@ -718,15 +721,22 @@ function linkDriveFiles(){
   jobs.forEach(function(job){
     var it=root.getFoldersByName(job.folder); if(!it.hasNext()) return; var col=col_(m,job.col); if(col<0) return;
     eachPdf_(it.next(),function(file){
-      scanned++; var name=file.getName(), rowIdx=-1;
-      if(job.key==='inv'){ var mi=name.match(/(5[01]\d{3})(?!\d)/); if(mi && byInv[mi[1]]!=null) rowIdx=byInv[mi[1]]; }
-      else { var mp=name.match(/EWSO?-?POR-?\d+/i); if(mp){ var k=mp[0].toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^EWSOPOR/,'EWSPOR'); if(byPoReq[k]!=null) rowIdx=byPoReq[k]; } }
-      if(rowIdx<0){ if(unmatched.length<25) unmatched.push(job.folder+': '+name); return; }
-      var cur=String(vals[rowIdx][col]||''); if(cur.indexOf(file.getId())>=0) return;   // already linked
-      sh.getRange(rowIdx+1,col+1).setValue(file.getUrl()); vals[rowIdx][col]=file.getUrl(); linked++;
+      scanned++; var name=file.getName(), rows=[];
+      if(job.key==='inv'){ var mi=name.match(/(5[01]\d{3})(?!\d)/); if(mi && byInv[mi[1]]!=null) rows=[byInv[mi[1]]]; }
+      else {
+        var mp=name.match(/EWSO?-?POR-?\d+/i);                                // our PO Request # (EWS-POR-######)
+        if(mp){ var k=norm_(mp[0]).replace(/^EWSOPOR/,'EWSPOR'); if(byPoReq[k]!=null) rows=[byPoReq[k]]; }
+        if(!rows.length){ var mc=name.match(/EWSO?-?PO(?!R)-?\d+/i);          // else the customer PO # (EWS-PO-####) — links every invoice on that PO
+          if(mc){ var kc=norm_(mc[0]); if(byCustPo[kc]) rows=byCustPo[kc]; } }
+      }
+      if(!rows.length){ if(unmatched.length<25) unmatched.push(job.folder+': '+name); return; }
+      rows.forEach(function(rowIdx){
+        var cur=String(vals[rowIdx][col]||''); if(cur.indexOf(file.getId())>=0) return;   // already linked
+        sh.getRange(rowIdx+1,col+1).setValue(file.getUrl()); vals[rowIdx][col]=file.getUrl(); linked++;
+      });
     });
   });
-  var msg='Linked '+linked+' of '+scanned+' PDF(s) across the four folders.';
+  var msg='Linked '+linked+' link(s) from '+scanned+' PDF(s) across the four folders.';
   if(unmatched.length) msg+='\n\nNo tracker match (check the ID in the filename):\n • '+unmatched.join('\n • ');
   return msg;
 }
