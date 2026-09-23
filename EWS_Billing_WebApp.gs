@@ -751,15 +751,20 @@ function linkDriveFiles(){
   var hr=trackerHeaderRow_(sh.getRange(1,1,Math.min(sh.getLastRow(),15),sh.getLastColumn()).getValues()); if(hr<0) hr=0;
   var m=ensureInboxCols_(sh,hr);                                       // ensure the four PDF-link columns exist
   var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
-  var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), iPo=col_(m,A.po), byInv={}, byPoReq={}, byCustPo={};
+  var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), iPo=col_(m,A.po), byInv={}, byPoReq={}, byCustPo={}, byCustPoNum={};
   var norm_=function(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); };
   var digits_=function(s){ var d=String(s==null?'':s).match(/\d{4,6}/); return d?d[0]:''; };   // the invoice-# column holds a bare number
   for(var r=hr+1;r<vals.length;r++){
     var inv=digits_(iInv>=0?vals[r][iInv]:''); if(inv) byInv[inv]=r;          // key by digits so "EWS-50494" / "50494" both match
     var pr=norm_(iPoReq>=0?vals[r][iPoReq]:'').replace(/^EWSOPOR/,'EWSPOR'); if(pr) byPoReq[pr]=r;
     var cp=norm_(iPo>=0?vals[r][iPo]:'');                                     // customer PO # (e.g. EWSO-PO-2518)
-    if(/^EWSO?PO\d+$/.test(cp)){ (byCustPo[cp]=byCustPo[cp]||[]).push(r); }   // one customer PO can cover several invoices
+    if(/^EWSO?PO\d+$/.test(cp)){ (byCustPo[cp]=byCustPo[cp]||[]).push(r);     // one customer PO can cover several invoices
+      var cn=cp.replace(/^EWSO?PO/,''); (byCustPoNum[cn]=byCustPoNum[cn]||[]).push(r); }   // digits-only fallback: "EWSO-PO-4471" typed on a row vs "EWS-PO-4471" on the PO
   }
+  // When two DIFFERENT files claim one row+column, keep the plain scheme name: no "(…)" qualifier first
+  // (e.g. "EWSO-PO-1867 - … - 765.pdf" beats "EWSO-PO-1867 - … - 765 (Change Order 1 - closed to 0.00).pdf"), then the shorter, then A→Z.
+  var better_=function(n1,n2){ var q1=/\(/.test(n1)?1:0, q2=/\(/.test(n2)?1:0; if(q1!==q2) return q1<q2;
+    if(n1.length!==n2.length) return n1.length<n2.length; return n1.localeCompare(n2)<0; };
   var root=DriveApp.getFolderById(DRIVE_ROOT), scanned=0, unmatched=[], dups=[];
   // Classify each PDF by its FILENAME (independent of folder layout); the four PDF columns are always managed.
   var COL={ inv:col_(m,A.invPdf), sgn:col_(m,A.sgnPdf), req:col_(m,A.poReqPdf), po:col_(m,A.poPdf) };
@@ -772,7 +777,8 @@ function linkDriveFiles(){
     } else if(/EWSO?-?POR/i.test(name)){                                     // 1 · PO Requests (POR before PO)
       col=COL.req; var mp=name.match(/EWSO?-?POR-?\d+/i); if(mp){ var k=norm_(mp[0]).replace(/^EWSOPOR/,'EWSPOR'); if(byPoReq[k]!=null) rows=[byPoReq[k]]; }
     } else if(/EWSO?-?PO(?!R)/i.test(name)){                                 // 2 · Customer POs — links every invoice on that PO
-      col=COL.po; var mc=name.match(/EWSO?-?PO(?!R)-?\d+/i); if(mc){ var kc=norm_(mc[0]); if(byCustPo[kc]) rows=byCustPo[kc]; }
+      col=COL.po; var mc=name.match(/EWSO?-?PO(?!R)-?\d+/i);
+      if(mc){ var kc=norm_(mc[0]); if(byCustPo[kc]) rows=byCustPo[kc]; else { var kn=kc.replace(/^EWSO?PO/,''); if(byCustPoNum[kn]) rows=byCustPoNum[kn]; } }
     } else if(/\bInvoice\b/i.test(name)){                                    // 3 · Invoices
       col=COL.inv; var n2=invNumFromName_(name); if(n2 && byInv[n2]!=null) rows=[byInv[n2]];
     } else return;
@@ -783,7 +789,7 @@ function linkDriveFiles(){
       if(!slot){ desired[col][rowIdx]={url:file.getUrl(),name:name}; return; }
       if(slot.name===name) return;                                          // same file seen twice — ignore
       var a={url:file.getUrl(),name:name};                                  // two DIFFERENT files claim one row+column
-      var keep=(name.localeCompare(slot.name)<0)?a:slot, drop=(keep===a)?slot:a;
+      var keep=better_(name,slot.name)?a:slot, drop=(keep===a)?slot:a;
       desired[col][rowIdx]=keep;
       if(dups.length<25) dups.push('"'+keep.name+'"  · also · "'+drop.name+'"');
     });
