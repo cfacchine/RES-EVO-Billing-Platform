@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.23-2 · built 2026-09-23 18:06 EDT · Job ID naming + 0 · Inbox + version stamp ==== */
+/* ==== VERSION 2026.09.23-3 · built 2026-09-23 18:40 EDT · POR-OP/ES series, pre-POR history, better migration dates ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.23-2', CODE_BUILT='2026-09-23 18:06 EDT';
+var CODE_VERSION='2026.09.23-3', CODE_BUILT='2026-09-23 18:40 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -413,7 +413,9 @@ function stepLabel_(p,action){
        : action==='custpo'  ? '2 PO '+(cleanName_(p.po)||'PENDING')
        :                      '1 PO Request';
 }
-function schemeKey_(p,action){ var job=cleanName_(p.poReq||''); return (job?job+' - ':'')+stepLabel_(p,action)+' - '; }  // name up to the date
+function porDisplay_(v){ var m=String(v==null?'':v).match(/EWSO?\s*-?\s*POR\s*-?\s*(?:([A-Z]{2})\s*-?\s*)?(\d+)/i);   // tidy Job ID: EWS-POR-000025 → EWS-POR-00025
+  if(!m) return cleanName_(v); var d=String(Number(m[2])); while(d.length<5) d='0'+d; return 'EWS-POR-'+(m[1]?m[1].toUpperCase()+'-':'')+d; }
+function schemeKey_(p,action){ var job=porDisplay_(p.poReq||''); return (job?job+' - ':'')+stepLabel_(p,action)+' - '; }  // name up to the date
 function pdfFileName_(p,action){
   return cleanName_(schemeKey_(p,action)+(isoDay_(p.date)||isoDay_(new Date()))+schemeTail_(p))+'.pdf';
 }
@@ -959,7 +961,7 @@ function linkDriveFiles(){
   var digits_=function(s){ var d=String(s==null?'':s).match(/\d{4,6}/); return d?d[0]:''; };   // the invoice-# column holds a bare number
   for(var r=hr+1;r<vals.length;r++){
     var inv=digits_(iInv>=0?vals[r][iInv]:''); if(inv) byInv[inv]=r;          // key by digits so "EWS-50494" / "50494" both match
-    var pr=norm_(iPoReq>=0?vals[r][iPoReq]:'').replace(/^EWSOPOR/,'EWSPOR'); if(pr) (byPoReq[pr]=byPoReq[pr]||[]).push(r);   // one job can carry several invoices
+    var pr=porNorm_(iPoReq>=0?vals[r][iPoReq]:''); if(pr) (byPoReq[pr]=byPoReq[pr]||[]).push(r);   // one job can carry several invoices
     var cp=norm_(iPo>=0?vals[r][iPo]:'');                                     // customer PO # (e.g. EWSO-PO-2518)
     if(/^EWSO?PO\d+$/.test(cp)){ (byCustPo[cp]=byCustPo[cp]||[]).push(r);     // one customer PO can cover several invoices
       var cn=cp.replace(/^EWSO?PO/,''); (byCustPoNum[cn]=byCustPoNum[cn]||[]).push(r); }   // digits-only fallback: "EWSO-PO-4471" typed on a row vs "EWS-PO-4471" on the PO
@@ -976,7 +978,7 @@ function linkDriveFiles(){
   eachPdf_(root,function(file){                                              // eachPdf_ skips _-prefixed folders (_Trash / _Needs Review)
     scanned++; var name=file.getName(), col=-1, rows=[], ps=parseScheme_(name);
     if(ps){                                                                  // NEW scheme: <Job ID> - <Step> <Doc #> - <date> - …
-      var jr=ps.job?(byPoReq[norm_(ps.job).replace(/^EWSOPOR/,'EWSPOR')]||[]):[];
+      var jr=ps.job?(byPoReq[porNorm_(ps.job)]||[]):[];
       if(ps.step===1){ col=COL.req; rows=jr; }
       else if(ps.step===2){ col=COL.po; var cr=[]; var kc2=norm_(ps.ref);
         if(kc2){ cr=byCustPo[kc2]||byCustPoNum[kc2.replace(/^EWSO?PO/,'')]||[]; }
@@ -991,7 +993,7 @@ function linkDriveFiles(){
     } else if(/^\s*SIGNED\b/i.test(name)){                                          // 4 · Signed Invoices
       col=COL.sgn; var n1=invNumFromName_(name); if(n1 && byInv[n1]!=null) rows=[byInv[n1]];
     } else if(/EWSO?-?POR/i.test(name)){                                     // 1 · PO Requests (POR before PO)
-      col=COL.req; var mp=name.match(/EWSO?-?POR-?\d+/i); if(mp){ var k=norm_(mp[0]).replace(/^EWSOPOR/,'EWSPOR'); if(byPoReq[k]) rows=byPoReq[k]; }
+      col=COL.req; var k=porNorm_(name); if(k && byPoReq[k]) rows=byPoReq[k];
     } else if(/EWSO?-?PO(?!R)/i.test(name)){                                 // 2 · Customer POs — links every invoice on that PO
       col=COL.po; var mc=name.match(/EWSO?-?PO(?!R)-?\d+/i);
       if(mc){ var kc=norm_(mc[0]); if(byCustPo[kc]) rows=byCustPo[kc]; else { var kn=kc.replace(/^EWSO?PO/,''); if(byCustPoNum[kn]) rows=byCustPoNum[kn]; } }
@@ -1185,10 +1187,10 @@ function fixDueDate(){
 var DRIVE_INBOX='0 · Inbox';
 
 /* Everything the filing code needs from the Billing Tracker tab, indexed once. */
-function trackerIndex_(){
-  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB); if(!sh) return null;
+function trackerIndex_(tab){
+  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(tab||WRITE_TAB); if(!sh) return null;
   var hr=trackerHeaderRow_(sh.getRange(1,1,Math.min(sh.getLastRow(),15),sh.getLastColumn()).getValues()); if(hr<0) hr=0;
-  var m=ensureInboxCols_(sh,hr), rng=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn());
+  var m=(!tab||tab===WRITE_TAB)?ensureInboxCols_(sh,hr):hdr_(sh.getRange(hr+1,1,1,sh.getLastColumn()).getValues()[0]), rng=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn());
   var vals=rng.getValues(), disp=rng.getDisplayValues();
   var X={ss:ss,sh:sh,hr:hr,m:m,vals:vals,disp:disp,byInv:{},byPoReq:{},byCustPo:{},custPoKeys:[]};
   var iInv=col_(m,A.inv), iPr=col_(m,A.poReq), iPo=col_(m,A.po);
@@ -1200,12 +1202,12 @@ function trackerIndex_(){
   return X;
 }
 function normId_(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); }
-function porNorm_(s){ var m=String(s==null?'':s).match(/EWSO?\s*-?\s*POR\s*-?\s*(\d+)/i); return m?('EWSPOR'+Number(m[1])):''; }  // EWS-POR-00022 ≡ EWSO-POR-22
+function porNorm_(s){ var m=String(s==null?'':s).match(/EWSO?\s*-?\s*POR\s*-?\s*(?:([A-Z]{2})\s*-?\s*)?(\d+)/i); return m?('EWSPOR'+(m[1]?m[1].toUpperCase():'')+Number(m[2])):''; }  // EWS-POR-00022 ≡ EWS-POR-000022 ≡ EWSO-POR-22; OP/ES series kept apart (EWS-POR-OP-00016)
 /* Row → the fields the file name is built from. */
 function rowFields_(X,r,extra){
   var v=X.vals[r], d=X.disp[r], o={ operator:cellVal_(v,X.m,A.operator), location:cellVal_(v,X.m,A.location), disc:cellVal_(v,X.m,A.disc),
     unit:cellVal_(v,X.m,A.unit), inv:cellVal_(v,X.m,A.inv), po:cellVal_(v,X.m,A.po), poReq:cellVal_(v,X.m,A.poReq),
-    invDate:dispToIso_(cellVal_(d,X.m,A.date)) };
+    invDate:dispToIso_(cellVal_(d,X.m,A.date)), start:isoDay_(parsePack_(cellVal_(v,X.m,A.lines)).start) };
   for(var k in (extra||{})) o[k]=extra[k];
   return o;
 }
@@ -1274,8 +1276,8 @@ function processDriveInbox_(preview){
 function classifyInboxPdf_(X,f,name){
   var ps=parseScheme_(name);
   function find(text){
-    var o={por:[],inv:[],cp:[]}, s=String(text||''), mm, rx=/EWSO?\s*-?\s*POR\s*-?\s*(\d+)/gi;
-    while((mm=rx.exec(s))){ var k='EWSPOR'+Number(mm[1]); if(X.byPoReq[k]) o.por=o.por.concat(X.byPoReq[k]); }
+    var o={por:[],inv:[],cp:[]}, s=String(text||''), mm, rx=/EWSO?\s*-?\s*POR\s*-?\s*(?:[A-Z]{2}\s*-?\s*)?\d+/gi;
+    while((mm=rx.exec(s))){ var k=porNorm_(mm[0]); if(X.byPoReq[k]) o.por=o.por.concat(X.byPoReq[k]); }
     var rxi=/\b(5[01]\d{3})\b/g; while((mm=rxi.exec(s))){ if(X.byInv[mm[1]]!=null && o.inv.indexOf(mm[1])<0) o.inv.push(mm[1]); }
     var ns=normId_(s); X.custPoKeys.forEach(function(k){ if(k.length>=5 && ns.indexOf(k)>=0) o.cp.push(k); });
     return o;
@@ -1305,46 +1307,57 @@ function classifyInboxPdf_(X,f,name){
 }
 
 /* ONE-TIME: rename every PDF under EWS Billing/<unit>/<stage> to the Job ID scheme (and move any file sitting in
-   the wrong unit/stage folder to the right one). Names/dates come from the tracker row: Operator/Location/Work
-   Type/Unit from the row, date = the invoice date for invoices, the file's created date for the other steps.
-   Files already on the new scheme, files with no tracker match, and rows with no PO Request # are left alone
-   and listed. Nothing is deleted. Run ▸ renameToJobIdPreview first, then Run ▸ renameToJobId, then linkDriveFiles. */
+   the wrong unit/stage folder to the right one). Names come from the tracker row (Billing Tracker, then Prior Years).
+   Jobs from before PO Requests existed get the same format without the Job ID prefix ("3 INV 50406 - 2025-01-08 - …").
+   Dates: invoices + signed copies → invoice date; PO Request / customer PO → job start date, else invoice date,
+   else the file's created date. Also re-dates files the first run stamped with the 2026-09-22 Drive-cleanup date.
+   Nothing is deleted. Run ▸ renameToJobIdPreview first, then Run ▸ renameToJobId, then linkDriveFiles. */
 function renameToJobIdPreview(){ var r=renameToJobId_(true); Logger.log(r); return r; }
 function renameToJobId(){ var r=renameToJobId_(false); Logger.log(r); return r; }
+var CLEANUP_DAY_='2026-09-22';                                        // created-date of every file after the Drive re-org
 function renameToJobId_(preview){
   var X=trackerIndex_(); if(!X) return 'Billing Tracker tab not found.';
-  var root=DriveApp.getFolderById(DRIVE_ROOT), T0=Date.now(), done=[], skip=[], moved=0, n=0, timedOut=false;
-  var planned={};                                                     // target path → true (avoid two files → one name)
+  var XP=null; try{ XP=trackerIndex_(TRK_TABS[1]); }catch(e){}
+  var root=DriveApp.getFolderById(DRIVE_ROOT), T0=Date.now(), done=[], skip=[], moved=0, n=0, timedOut=false, planned={};
   eachPdf_(root,function(f){
     if(timedOut) return; if(Date.now()-T0>300000){ timedOut=true; return; }   // stay under the 6-min limit; re-run to continue
-    var name=f.getName(); if(parseScheme_(name)) return;              // already renamed
+    var name=f.getName(), ps=parseScheme_(name), c=null, src=X;
+    if(ps){ if(ps.date!==CLEANUP_DAY_) return;                        // already on the new scheme with a real date
+      c=schemeClassify_(X,ps); if(!c.rows.length && XP){ c=schemeClassify_(XP,ps); src=XP; } }
+    else { c=legacyClassify_(X,name); if((!c||!c.rows.length) && XP){ var cp=legacyClassify_(XP,name); if(cp&&cp.rows.length){ c=cp; src=XP; } } }
     n++;
-    var c=legacyClassify_(X,name);
     if(!c || !c.rows.length){ skip.push(name+'  (no tracker match)'); return; }
-    var r=c.rows[0], p=rowFields_(X,r,{});
-    if(!p.poReq){ skip.push(name+'  (row has no PO Request #)'); return; }
+    var p=rowFields_(src,c.rows[0],{});
     if(c.inv) p.inv=c.inv; if(c.po) p.po=c.po;
-    p.date=(c.action==='invoice' && p.invDate) ? p.invDate : isoDay_(f.getDateCreated());
-    var fname=pdfFileName_(p,c.action), uf=unitFolder_(p.unit);
-    var cur=f.getParents().hasNext()?f.getParents().next():root;
+    p.date=(c.action==='invoice'||c.action==='signed') ? (p.invDate||p.start) : (p.start||p.invDate);
+    if(!p.date) p.date=isoDay_(f.getDateCreated());
+    var fname=pdfFileName_(p,c.action); if(fname===name) return;
+    var uf=unitFolder_(p.unit), cur=f.getParents().hasNext()?f.getParents().next():root;
     var dest=uf?billingFolder_(root,p,c.action):cur, key=dest.getId()+'/'+fname;
-    if(planned[key] || (dest.getFilesByName(fname).hasNext())){ fname=fname.replace(/\.pdf$/i,' (2).pdf'); key=dest.getId()+'/'+fname; }
+    if(planned[key] || dest.getFilesByName(fname).hasNext()){ fname=fname.replace(/\.pdf$/i,' (2).pdf'); key=dest.getId()+'/'+fname; }
     planned[key]=true;
     var mv=dest.getId()!==cur.getId();
-    done.push(name+'\n     → '+(mv?(uf+' / '+stageFolder_(c.action)+' / '):'')+fname+(c.note?'   ['+c.note+']':''));
+    done.push(name+'\n     → '+(mv?(uf+' / '+stageFolder_(c.action)+' / '):'')+fname+(src===XP?'   [Prior Years row]':'')+(p.poReq?'':'   [no PO Request — pre-POR job]')+(c.note?'   ['+c.note+']':''));
     if(!preview){ f.setName(fname); if(mv){ f.moveTo(dest); moved++; } }
   });
   if(!preview && done.length) bustCache_();
-  var out=(preview?'WOULD rename ':'Renamed ')+done.length+' of '+n+' old-style PDF(s)'+(moved?(', moved '+moved+' to the right folder'):'')+(done.length?':\n • '+done.join('\n • '):'.');
+  var out=(preview?'WOULD rename ':'Renamed ')+done.length+' of '+n+' PDF(s) checked'+(moved?(', moved '+moved+' to the right folder'):'')+(done.length?':\n • '+done.join('\n • '):'.');
   if(skip.length) out+='\n\nLeft as-is:\n • '+skip.join('\n • ');
   if(timedOut) out+='\n\n⏱ Stopped near the time limit — run it again to finish the rest.';
   return out+(preview?'\n\n(preview only — nothing changed)':'');
+}
+/* New-scheme name → {action, rows, inv, po} against an index. */
+function schemeClassify_(X,ps){
+  var jr=ps.job?(X.byPoReq[porNorm_(ps.job)]||[]):[], rows=[], inv='', po='';
+  if(ps.step===3||ps.step===4){ inv=(String(ps.ref).match(/\d{4,6}/)||[''])[0]; rows=(inv&&X.byInv[inv]!=null)?[X.byInv[inv]]:(jr.length===1?jr:[]); }
+  else { rows=jr; if(ps.step===2){ po=ps.ref; if(!rows.length){ var k=normId_(ps.ref); if(X.byCustPo[k]) rows=X.byCustPo[k]; } } }
+  return {action:ps.action, rows:rows, inv:inv, po:po};
 }
 /* Old-style name → {action, rows, inv, po}. Mirrors linkDriveFiles' old-name rules. */
 function legacyClassify_(X,name){
   var mm, inv=invNumFromName_(name);
   if(/^\s*SIGNED\b/i.test(name)) return {action:'signed', rows:(inv&&X.byInv[inv]!=null)?[X.byInv[inv]]:[], inv:inv};
-  if((mm=name.match(/EWSO?-?POR-?\d+/i))) return {action:'po', rows:X.byPoReq[porNorm_(mm[0])]||[]};
+  if(/EWSO?-?POR/i.test(name)) return {action:'po', rows:X.byPoReq[porNorm_(name)]||[]};
   if((mm=name.match(/EWSO?-?PO(?!R)-?\d+/i))){
     var k=normId_(mm[0]), rows=X.byCustPo[k]||[];
     if(!rows.length){ var kn=k.replace(/^EWSO?PO/,''); X.custPoKeys.forEach(function(ck){ if(!rows.length && ck.replace(/^EWSO?PO/,'')===kn) rows=X.byCustPo[ck]; }); }
