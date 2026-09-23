@@ -80,7 +80,8 @@ var A = {
   invPdf:['invoice pdf','invoice pdf link'],
   poPdf:['po assigned pdf','approved po pdf','customer po pdf'],   // approved customer-PO PDF (filed by Inbox auto-file)
   sgnPdf:['signed invoice pdf','signed pdf'],                      // signed-invoice PDF (filed by Inbox auto-file)
-  inbox:['inbox','inbox flag','inbox status']                     // "PO received — confirm" / "Signed — confirm"
+  inbox:['inbox','inbox flag','inbox status'],                    // "PO received — confirm" / "Signed — confirm"
+  draft:['draft']                                                  // ☆ dashboard star: invoice pre-built as a draft (no PO yet)
 };
 
 function doGet(e){
@@ -188,7 +189,7 @@ function summaryRow_(v,ci,name,rowNum,dd){ dd=dd||{};
         contactName:String(g_(v,ci.cName)||''), contactEmail:String(g_(v,ci.cEmail)||''), contactPhone:String(g_(v,ci.cPhone)||''),
         terms:String(g_(v,ci.terms)||''), paidDate:(dd.paidDate||fmtDate_(g_(v,ci.paidDate))), sentDate:(dd.sentDate||fmtDate_(g_(v,ci.sentDate))),
         pdfUrl:String(g_(v,ci.invPdf)||g_(v,ci.poReqPdf)||''),
-        poPdf:String(g_(v,ci.poPdf)||''), sgnPdf:String(g_(v,ci.sgnPdf)||''), inboxFlag:String(g_(v,ci.inbox)||''),
+        poPdf:String(g_(v,ci.poPdf)||''), sgnPdf:String(g_(v,ci.sgnPdf)||''), inboxFlag:String(g_(v,ci.inbox)||''), draft:x_(g_(v,ci.draft)),
         lineItems:pk.lines, notes:(pk.notes || String(g_(v,ci.notes)||'')),
         _tab:name, _row:rowNum };
 }
@@ -492,6 +493,7 @@ function tidyBillingTracker_(preview){
 }
 
 function updateRow_(p){
+  if(p.field==='draft') return setDraft_(p);
   if(!p.inv) return false;
   var ss=SpreadsheetApp.openById(BOOK_ID);
   var isPaid=p.field==='paid';
@@ -504,6 +506,17 @@ function updateRow_(p){
     if(iSt>=0){ var stc=f.sh.getRange(f.row,iSt+1), cur=String(stc.getValue()||'').trim();
       if(mark==='Yes') stc.setValue('Paid');
       else if(/^paid$/i.test(cur)) stc.setValue(''); } }
+  return true;
+}
+
+/* ☆ Draft flag (dashboard star). Finds the row by Invoice #, else PO Request #; adds a "Draft" column
+   at the end of the header row the first time it's used. Value "Yes" or blank. */
+function setDraft_(p){
+  var ss=SpreadsheetApp.openById(BOOK_ID), on=String(p.value).toLowerCase().charAt(0)==='y';
+  var f=(p.inv && findRowBy_(ss,A.inv,p.inv)) || (p.poReq && findRowBy_(ss,A.poReq,p.poReq)); if(!f) return false;
+  var c=col_(f.m,A.draft);
+  if(c<0){ var h=hdrInfo_(f.sh); c=f.sh.getLastColumn(); f.sh.getRange(h.hr+1,c+1).setValue('Draft'); delete HDR_MEMO_[f.sh.getName()]; }
+  f.sh.getRange(f.row,c+1).setValue(on?'Yes':'');
   return true;
 }
 

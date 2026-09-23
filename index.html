@@ -159,7 +159,11 @@ table.data tbody tr:last-child td{border-bottom:none}
 .unitbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;font-family:"Archivo";letter-spacing:.03em}
 .u755{background:var(--green-tint);color:var(--green-deep)} .u765{background:var(--info-bg);color:var(--info)}
 .yn-y{color:var(--ok);font-weight:600} .yn-n{color:var(--warn);font-weight:600}
-.paid-row{background:rgba(46,158,79,.09)} .paid-row td:nth-child(2){text-decoration:line-through;opacity:.75}
+.paid-row{background:rgba(46,158,79,.09)}
+/* ☆ Draft (no PO yet, still estimating) — orange */
+table.data tbody tr.draft-row>td{background:#fbe9d4;background:color-mix(in srgb,#ea8a18 16%,var(--card))} .draft-row td:first-child{box-shadow:inset 3px 0 0 #ea8a18}
+.star{background:none;border:0;padding:0 5px 0 0;margin:0;cursor:pointer;font-size:15px;line-height:1;color:var(--muted);opacity:.55;vertical-align:-1px;transition:color .15s,opacity .15s,transform .15s}
+.star:hover{opacity:1;color:#ea8a18;transform:scale(1.15)} .star.on{color:#ea8a18;opacity:1} .paid-row td:nth-child(2){text-decoration:line-through;opacity:.75}
 .agecell{display:inline-flex;align-items:center;gap:7px} .agestripe{width:4px;height:14px;border-radius:2px;display:inline-block}
 .err-dot{color:var(--crit);font-weight:700}
 .chev{display:inline-block;transition:transform .15s;color:var(--muted-2);font-size:11px} tr.main.open .chev{transform:rotate(90deg)}
@@ -690,7 +694,7 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl","poPdf","sgnPdf","start","end"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl","poPdf","sgnPdf","start","end","draft"];
 const TODAY = (function(){ var d=new Date(); d.setHours(0,0,0,0); return d; })();   // live "today" (local midnight): Days Outstanding = today − Invoice Date (from the Billing Tracker)
 const REMIND_DAYS = 7;   // remind on invoices still open this many days after being sent for signature
 let DATA = { rows: [] };
@@ -724,7 +728,7 @@ function parseNotes(n){ n=String(n||""); var fleet=""; var fm=n.match(/Fleet\s*#
   return {operator:operator, location:location, disc:disc, fleet:fleet}; }
 function toRows(arr){ return arr.map(function(r,ix){ var o={}; COLS.forEach(function(c,i){o[c]=r[i];}); o.amount=Number(o.amount)||0; o.id=ix;
   var p=parseNotes(o.notes); o.operator=o.operator||p.operator; o.location=o.location||p.location; o.disc=o.disc||p.disc; o.fleet=o.fleet||p.fleet; o.unit=unitFor(o);
-  o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent); o.paid=yn(o.paid);
+  o.signed=yn(o.signed); o.poAssigned=yn(o.poAssigned); o.reminderSent=yn(o.reminderSent); o.paid=yn(o.paid); o.draft=yn(o.draft);
   o.po=o.po||""; o.invoiceStatus=o.invoiceStatus||""; o.lineItems=Array.isArray(o.lineItems)?o.lineItems:[];
   o.age=Math.max(0,Math.round((TODAY-new Date(o.date+"T00:00:00"))/86400000)); o.bucket=ageBucket(o.age);
   o.sigAge = o.sentDate ? Math.max(0,Math.round((TODAY-new Date(o.sentDate+"T00:00:00"))/86400000)) : o.age;   // days since sent for signature
@@ -1892,9 +1896,11 @@ function renderTracker(){
     if(q){ var hay=(x.inv+" "+x.poReq+" "+x.location+" "+x.operator).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; }).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
   var ynSel=function(id,field,val){ return '<select class="tr-sel" onchange="editRow('+id+',\''+field+'\',this.value)"><option '+(val==="Yes"?"selected":"")+'>Yes</option><option '+(val!=="Yes"?"selected":"")+'>No</option></select>'; };
   document.getElementById("trackBody").innerHTML=rows.map(function(x){ var op=trackOpen[x.id];
-    var main='<tr class="'+(op?"open ":"")+(x.paid==="Yes"?"paid-row":"")+'">'
+    var noPO=!String(x.po||"").trim(), isDraft=noPO&&x.draft==="Yes";
+    var star=noPO?'<button class="star'+(isDraft?" on":"")+'" onclick="toggleDraft('+x.id+')" title="'+(isDraft?"Draft — click to unmark":"Mark as draft (pre-built, not sent yet)")+'" aria-label="'+(isDraft?"Unmark draft":"Mark as draft")+'" aria-pressed="'+isDraft+'">'+(isDraft?"★":"☆")+'</button>':"";
+    var main='<tr class="'+(op?"open ":"")+(x.paid==="Yes"?"paid-row ":"")+(isDraft?"draft-row":"")+'">'
     +'<td style="cursor:pointer;text-align:center" onclick="toggleTrack('+x.id+')" title="Show details"><span class="chev">▶</span></td>'
-    +'<td class="mono">'+fmtDate(x.date)+'</td><td class="mono">'+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
+    +'<td class="mono">'+fmtDate(x.date)+'</td><td class="mono" style="white-space:nowrap">'+star+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
     +'<td class="clip" title="'+esc(x.operator)+'">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip" title="'+esc(x.location)+'">'+esc(x.location)+'</td><td class="clip" title="'+esc(x.disc)+'">'+(esc(x.disc)||"—")+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
     +'<td class="r num">'+money(x.amount)+'</td>'
     +'<td>'+ynSel(x.id,"paid",x.paid)+'</td><td>'+ynSel(x.id,"signed",x.signed)+'</td><td>'+ynSel(x.id,"poAssigned",x.poAssigned)+'</td><td>'+ynSel(x.id,"reminder",x.reminderSent)+'</td>'
@@ -1902,6 +1908,13 @@ function renderTracker(){
     return op ? main+'<tr class="expand"><td colspan="16">'+expInner(x, btnOpen(x.id)+btnRem(x.id))+'</td></tr>' : main;
   }).join("")
     ||'<tr><td colspan="16" style="text-align:center;color:var(--muted);padding:26px">No matching rows.</td></tr>';
+}
+function toggleDraft(id){
+  var row=DATA.rows.find(function(r){return r.id===id;}); if(!row) return;
+  row.draft=row.draft==="Yes"?"No":"Yes"; renderTracker();
+  toast(row.draft==="Yes"?("Marked "+(row.inv?"#"+row.inv:row.poReq)+" as a draft"):("Draft mark removed"+(row.inv?" from #"+row.inv:"")));
+  if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:row.inv,poReq:row.poReq,field:"draft",value:row.draft}})
+    .then(function(j){ if(j&&j.ok===false) throw 0; }).catch(function(){ toast("Couldn’t save the draft mark to the sheet","warn"); });
 }
 function toggleTrack(id){ trackOpen[id]=!trackOpen[id]; renderTracker(); }
 function editRow(id,field,val){
