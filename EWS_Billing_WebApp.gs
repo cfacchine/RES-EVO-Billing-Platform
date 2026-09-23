@@ -90,6 +90,7 @@ function doGet(e){
   if(a==='lists')     return json_(getLists_());
   if(a==='emails')    return json_(getEmails_());
   if(a==='inspect')   return json_(inspect_());
+  if(a==='sheetstats') return json_(sheetStats_());                          // read-only workbook weight report (#9)
   if(a==='logins')    return json_(getLogins_(e));
   if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);          // #3: schedule+directory+lists+emails in ONE call
   return cachedJson_('sum', getSummary_, e);                                   // #1: cached summary
@@ -132,13 +133,15 @@ function getBootstrap_(){
   return { schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_) };
 }
 function doPost(e){
-  try{ var body=JSON.parse(e.postData.contents); var lock=LockService.getScriptLock(); lock.tryLock(20000);
+  var T0=Date.now(), TM={};                                                    // per-step timings → "_ms" in the reply
+  try{ var body=JSON.parse(e.postData.contents); var lock=LockService.getScriptLock(); lock.tryLock(20000); TM.lock=Date.now()-T0;
     try{ if(body.action==='logLogin') return json_({ok:true,row:logLogin_(body.payload||{})});
          if(body.action==='po'||body.action==='invoice'||body.action==='save'){
-           var loc=(body.action==='save')?saveDoc_(body.payload||{}):appendDoc_(body.payload||{},body.action);
-           bustCache_(); var rowN=(loc&&loc.row)?loc.row:loc, tab=(loc&&loc.tab)?loc.tab:WRITE_TAB;
-           return json_({ok:true,row:rowN,rec:rowRecord_(tab,rowN)}); }                     // #8: send back the saved row
-         if(body.action==='update'){ var ok=updateRow_(body.payload||{}); if(ok) bustCache_(); return json_({ok:ok}); }
+           var t1=Date.now(), loc=(body.action==='save')?saveDoc_(body.payload||{}):appendDoc_(body.payload||{},body.action);
+           TM.write=Date.now()-t1; bustCache_(); var rowN=(loc&&loc.row)?loc.row:loc, tab=(loc&&loc.tab)?loc.tab:WRITE_TAB;
+           var t2=Date.now(), rec=rowRecord_(tab,rowN); TM.readBack=Date.now()-t2; TM.total=Date.now()-T0;
+           return json_({ok:true,row:rowN,rec:rec,_ms:TM}); }                     // #8: send back the saved row
+         if(body.action==='update'){ var ok=updateRow_(body.payload||{}); if(ok) bustCache_(); TM.total=Date.now()-T0; return json_({ok:ok,_ms:TM}); }
          if(body.action==='delete'){ var dr=deleteDoc_(body.payload||{}); if(dr) bustCache_(); return json_({ok:!!dr,row:(dr||0),tab:WRITE_TAB}); }
          if(body.action==='tidy' && body.payload && body.payload.confirm==='TIDY'){ var msg=tidyBillingTracker_(false); bustCache_(); return json_({ok:true,msg:msg}); }
          return json_({error:'unknown action'}); }
@@ -225,6 +228,19 @@ function relabelBillingUnit(){
 }
 
 /* ============================ INSPECT (verification) ============================ */
+/* Read-only: size + formula weight of every tab, so we can see what the workbook recalculates on each save. */
+function sheetStats_(){
+  var ss=SpreadsheetApp.openById(BOOK_ID), out=[], VOL=/\b(NOW|TODAY|RAND|RANDBETWEEN|INDIRECT|OFFSET|IMPORTRANGE|IMPORTXML|IMPORTDATA|GOOGLEFINANCE)\s*\(/i;
+  ss.getSheets().forEach(function(sh){
+    var t=Date.now(), lr=sh.getLastRow(), lc=sh.getLastColumn(), f=0, refs=0, vol=0, arr=0, whole=0;
+    if(lr>0&&lc>0){ sh.getRange(1,1,lr,lc).getFormulas().forEach(function(row){ row.forEach(function(x){ if(!x) return; f++;
+      if(/Billing Tracker/i.test(x)) refs++; if(VOL.test(x)) vol++; if(/ARRAYFORMULA|QUERY\s*\(|FILTER\s*\(/i.test(x)) arr++;
+      if(/![A-Z]{1,3}:[A-Z]{1,3}\b|\b[A-Z]{1,3}:[A-Z]{1,3}\b/.test(x)) whole++; }); }); }
+    out.push({tab:sh.getName(), hidden:sh.isSheetHidden(), maxRows:sh.getMaxRows(), maxCols:sh.getMaxColumns(), lastRow:lr, lastCol:lc,
+      formulas:f, refsTracker:refs, volatile:vol, arrayOrQuery:arr, wholeColumnRefs:whole, readMs:Date.now()-t});
+  });
+  return {tabs:out};
+}
 function inspect_(){
   var ss=SpreadsheetApp.openById(BOOK_ID), out={book:ss.getName(), tabs:[]};
   TRK_TABS.forEach(function(name){
