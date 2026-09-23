@@ -166,19 +166,19 @@ function getSummary_(){
     var sh=ss.getSheetByName(name); if(!sh||sh.getLastRow()<2) return;
     var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
     var hr=trackerHeaderRow_(vals); if(hr<0) return; var m=hdr_(vals[hr]);
-    var ci=mapCols_(m);
-    for(var r=hr+1;r<vals.length;r++){ var rec=summaryRow_(vals[r],ci,name,r+1); if(rec) out.push(rec); }
+    var ci=mapCols_(m), dc=dateDisplayCols_(sh,ci,vals.length);
+    for(var r=hr+1;r<vals.length;r++){ var rec=summaryRow_(vals[r],ci,name,r+1,dispRow_(dc,r)); if(rec) out.push(rec); }
   });
   return { rows:out };
 }
 /* One tracker row → the summary record the dashboard uses. _row/_tab let the dashboard patch a single record in place. */
-function summaryRow_(v,ci,name,rowNum){
+function summaryRow_(v,ci,name,rowNum,dd){ dd=dd||{};
       var inv=g_(v,ci.inv), amt=g_(v,ci.amount), poReq=g_(v,ci.poReq);
       if(!inv && !amt && !poReq) return null;
       var status=String(g_(v,ci.status)||'');
       var paid = (paid_(g_(v,ci.paid))==='Yes' || /paid|collected/i.test(status)) ? 'Yes':'No';
       var pk = parsePack_(g_(v,ci.lines));
-      return { inv:String(inv||'').trim(), date:fmtDate_(g_(v,ci.date)), amount:Number(amt)||0,
+      return { inv:String(inv||'').trim(), date:(dd.date||fmtDate_(g_(v,ci.date))), amount:Number(amt)||0,
         start:pk.start||'', end:pk.end||'',
         signed:x_(g_(v,ci.signed)), poReq:String(poReq||''), poAssigned: g_(v,ci.po)?'Yes':x_(g_(v,ci.poAssigned)),
         reminderSent:x_(g_(v,ci.reminder)), paid:paid, invoiceStatus:status,
@@ -186,7 +186,7 @@ function summaryRow_(v,ci,name,rowNum){
         operator:String(g_(v,ci.operator)||''), location:String(g_(v,ci.location)||''), disc:String(g_(v,ci.disc)||''),
         fleet:String(g_(v,ci.fleet)||''),
         contactName:String(g_(v,ci.cName)||''), contactEmail:String(g_(v,ci.cEmail)||''), contactPhone:String(g_(v,ci.cPhone)||''),
-        terms:String(g_(v,ci.terms)||''), paidDate:fmtDate_(g_(v,ci.paidDate)), sentDate:fmtDate_(g_(v,ci.sentDate)),
+        terms:String(g_(v,ci.terms)||''), paidDate:(dd.paidDate||fmtDate_(g_(v,ci.paidDate))), sentDate:(dd.sentDate||fmtDate_(g_(v,ci.sentDate))),
         pdfUrl:String(g_(v,ci.invPdf)||g_(v,ci.poReqPdf)||''),
         poPdf:String(g_(v,ci.poPdf)||''), sgnPdf:String(g_(v,ci.sgnPdf)||''), inboxFlag:String(g_(v,ci.inbox)||''),
         lineItems:pk.lines, notes:(pk.notes || String(g_(v,ci.notes)||'')),
@@ -199,9 +199,19 @@ function rowRecord_(tab,rowN){
     var lc=sh.getLastColumn(), top=sh.getRange(1,1,Math.min(sh.getLastRow(),15),lc).getValues();
     var hr=trackerHeaderRow_(top); if(hr<0) return null;
     var ci=mapCols_(hdr_(top[hr]));
-    return summaryRow_(sh.getRange(rowN,1,1,lc).getValues()[0],ci,tab||WRITE_TAB,rowN);
+    var dd={}; ['date','paidDate','sentDate'].forEach(function(k){ if(ci[k]>=0) dd[k]=dispToIso_(sh.getRange(rowN,ci[k]+1).getDisplayValue()); });
+    return summaryRow_(sh.getRange(rowN,1,1,lc).getValues()[0],ci,tab||WRITE_TAB,rowN,dd);
   }catch(e){ return null; }
 }
+/* Dates come from what the cell DISPLAYS (e.g. "1/7/2026"), so the dashboard always shows exactly the date
+   in the sheet — no time-zone conversion can shift it a day. Falls back to the raw value if the text isn't a date. */
+function dateDisplayCols_(sh,ci,nRows){ var out={};
+  ['date','paidDate','sentDate'].forEach(function(k){ if(ci[k]>=0) out[k]=sh.getRange(1,ci[k]+1,nRows,1).getDisplayValues(); }); return out; }
+function dispRow_(dc,r){ var o={}; Object.keys(dc).forEach(function(k){ o[k]=dispToIso_(dc[k][r]&&dc[k][r][0]); }); return o; }
+function dispToIso_(s){ s=String(s||'').trim(); var m;
+  if((m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return m[1]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[3]).slice(-2);
+  if((m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/))){ var y=m[3].length===2?'20'+m[3]:m[3]; return y+'-'+('0'+m[1]).slice(-2)+'-'+('0'+m[2]).slice(-2); }
+  return ''; }
 function mapCols_(m){
   var ci={}; Object.keys(A).forEach(function(k){ ci[k]=col_(m,A[k]); });
   ci.poAssigned=col_(m,['po assigned']);
