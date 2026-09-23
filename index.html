@@ -735,16 +735,33 @@ function needsPO(x){ return !isPaid(x) && x.poAssigned!=="Yes"; }
 
 var _retryT=null, _failN=0, _loading=false;
 function scheduleRetry(){ if(_retryT) clearTimeout(_retryT); var wait=_failN<4?8000:20000; _retryT=setTimeout(function(){ loadData(false); }, wait); }
+function ingestRows(rows){
+  LIVE_PAID = !!(rows.length && Object.prototype.hasOwnProperty.call(rows[0],"paid"));
+  DATA.rows=toRows(rows.map(function(r){return COLS.map(function(c){return r[c];});}));
+  DATA.rows.forEach(function(o,i){ o._row=rows[i]._row; o._tab=rows[i]._tab; });   // sheet position → lets a save patch just its row (#8)
+}
+/* #4: paint the last copy of the sheet this browser saw, instantly, while the live pull runs. */
+function paintCached(){
+  try{
+    var c=JSON.parse(localStorage.getItem("revo-sum")||"null");
+    if(!c||!Array.isArray(c.rows)||!c.rows.length) return false;
+    ingestRows(c.rows); LIVE=true;                        // edits made in the meantime still go to the sheet
+    var mins=Math.max(0,Math.round((Date.now()-(c.t||0))/60000));
+    setStatus("is-wait","Last copy ("+(mins<1?"just now":mins<60?mins+" min ago":Math.round(mins/60)+" h ago")+") · refreshing…");
+    demoOff(); renderAll(); return true;
+  }catch(e){ return false; }
+}
 async function loadData(manual){
   if(_loading) return;                                   // a load is already in flight
   if(_retryT){ clearTimeout(_retryT); _retryT=null; }
   if(CONFIG.EXEC_URL){
     _loading=true;
-    setStatus(_failN?"is-warn":"is-wait", _failN?"Reconnecting…":"Connecting…");
+    if(!DATA.rows.length && paintCached()){ /* painted last copy — live data replaces it below */ }
+    else setStatus(_failN?"is-warn":"is-wait", _failN?"Reconnecting…":"Connecting…");
     try{
       var j=await fetch(CONFIG.EXEC_URL+"?action=summary"+(manual?"&fresh=1":"")).then(function(r){return r.json();});   // manual Refresh skips the server cache
-      if(j&&j.rows){ LIVE_PAID = !!(j.rows.length && Object.prototype.hasOwnProperty.call(j.rows[0],"paid")); DATA.rows=toRows(j.rows.map(function(r){return COLS.map(function(c){return r[c];});}));
-        DATA.rows.forEach(function(o,i){ o._row=j.rows[i]._row; o._tab=j.rows[i]._tab; });   // sheet position → lets a save patch just its row (#8)
+      if(j&&j.rows){ ingestRows(j.rows);
+        try{ localStorage.setItem("revo-sum", JSON.stringify({t:Date.now(), rows:j.rows})); }catch(e){}   // #4: keep a copy for an instant next open
         LIVE=true; _failN=0; setStatus("is-live","Live · sheet"); demoOff(); renderAll(); _loading=false;   // paint the sheet immediately — don't block the dashboard on the config fetches
         loadLiveConfig().then(function(){ renderAll(); });   // rates / directory / operator+disc lists / CC lists load in parallel in the background, then one refresh
         if(manual) toast("Refreshed from the live sheet"); return; }
