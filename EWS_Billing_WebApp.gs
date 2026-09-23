@@ -696,11 +696,24 @@ function inboxMarkSeen_(ss,id,label){ var sh=ss.getSheetByName(INBOX.LOG_TAB);
   if(!sh){ sh=ss.insertSheet(INBOX.LOG_TAB); sh.getRange(1,1,1,3).setValues([['Message Id','Filed','When']]); sh.setFrozenRows(1); }
   sh.appendRow([id,label,new Date()]); }
 
-/* RE-RUNNABLE: index the four EWS Billing folders (and their Year subfolders), match each PDF to a
-   tracker row by the ID in its filename, and write the Drive link into that row's PDF column. Pulls in
+/* Pull the invoice # out of a filename, ANCHORED on the word "Invoice"/"Inv" (or an explicit "EWS-#####")
+   so a stray 5-digit number in the name (fleet #, customer PO #, a date, a $ amount) is never mistaken
+   for the invoice number. Returns '' when the name carries no clearly-labelled invoice number. */
+function invNumFromName_(name){
+  var s=String(name||'');
+  var m=s.match(/\bInv(?:oice)?\.?\s*#?\s*(?:EWS[-\s]*)?(\d{4,6})\b/i);   // "Invoice 50494", "Inv #50494", "Invoice EWS-50494"
+  if(m) return m[1];
+  m=s.match(/\bEWS[-\s]*(\d{4,6})\b/i);                                   // bare "EWS-50494" (POR #s never match: letters follow EWS-)
+  return m?m[1]:'';
+}
+/* RE-RUNNABLE + AUTHORITATIVE: index the four EWS Billing folders (and their Year subfolders), match each
+   PDF to a tracker row by the ID in its filename, and make each row's PDF columns EXACTLY reflect the
+   files on Drive — it writes the matched link, and CLEARS a link that points at no matching file (so a
+   stale/wrong link, e.g. a signed-invoice cell left pointing at another invoice, is removed). Pulls in
    files the system saved AND anything you filed by hand. Run it from the editor (Run ▸ linkDriveFiles)
-   after adding PDFs. Naming that matches: PO folders must contain the PO Request # (EWS-POR-…),
-   invoice folders the 5-digit invoice # (e.g. 50494). */
+   after adding PDFs. Matching: invoice folders need "Invoice <#####>" in the name (e.g. "Invoice 50494");
+   PO folders need the PO Request # (EWS-POR-…) or the customer PO # (EWS-PO-…). It also flags duplicates
+   (two files claiming the same row) so you can remove the extra copy. */
 function linkDriveFiles(){
   var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB);
   if(!sh) return 'Billing Tracker tab not found.';
@@ -709,20 +722,24 @@ function linkDriveFiles(){
   var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
   var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), iPo=col_(m,A.po), byInv={}, byPoReq={}, byCustPo={};
   var norm_=function(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); };
+  var digits_=function(s){ var d=String(s==null?'':s).match(/\d{4,6}/); return d?d[0]:''; };   // the invoice-# column holds a bare number
   for(var r=hr+1;r<vals.length;r++){
-    var inv=String(iInv>=0?vals[r][iInv]:'').trim(); if(inv) byInv[inv]=r;
+    var inv=digits_(iInv>=0?vals[r][iInv]:''); if(inv) byInv[inv]=r;          // key by digits so "EWS-50494" / "50494" both match
     var pr=norm_(iPoReq>=0?vals[r][iPoReq]:'').replace(/^EWSOPOR/,'EWSPOR'); if(pr) byPoReq[pr]=r;
     var cp=norm_(iPo>=0?vals[r][iPo]:'');                                     // customer PO # (e.g. EWSO-PO-2518)
     if(/^EWSO?PO\d+$/.test(cp)){ (byCustPo[cp]=byCustPo[cp]||[]).push(r); }   // one customer PO can cover several invoices
   }
-  var root=DriveApp.getFolderById(DRIVE_ROOT), linked=0, scanned=0, unmatched=[];
+  var root=DriveApp.getFolderById(DRIVE_ROOT), scanned=0, unmatched=[], dups=[];
   var jobs=[ {folder:'PO Requests',col:A.poReqPdf,key:'po'}, {folder:'Invoice Request',col:A.invPdf,key:'inv'},
              {folder:'PO Assigned',col:A.poPdf,key:'po'},  {folder:'Invoice Signed',col:A.sgnPdf,key:'inv'} ];
+  var desired={}, managed={};                          // desired[colIdx][rowIdx]={url,name}; managed = columns whose folder we scanned
   jobs.forEach(function(job){
-    var it=root.getFoldersByName(job.folder); if(!it.hasNext()) return; var col=col_(m,job.col); if(col<0) return;
+    var col=col_(m,job.col); if(col<0) return;
+    var it=root.getFoldersByName(job.folder); if(!it.hasNext()) return;       // folder missing → do NOT touch this column
+    managed[job.folder]=col; if(!desired[col]) desired[col]={};
     eachPdf_(it.next(),function(file){
       scanned++; var name=file.getName(), rows=[];
-      if(job.key==='inv'){ var mi=name.match(/(5[01]\d{3})(?!\d)/); if(mi && byInv[mi[1]]!=null) rows=[byInv[mi[1]]]; }
+      if(job.key==='inv'){ var num=invNumFromName_(name); if(num && byInv[num]!=null) rows=[byInv[num]]; }
       else {
         var mp=name.match(/EWSO?-?POR-?\d+/i);                                // our PO Request # (EWS-POR-######)
         if(mp){ var k=norm_(mp[0]).replace(/^EWSOPOR/,'EWSPOR'); if(byPoReq[k]!=null) rows=[byPoReq[k]]; }
@@ -731,12 +748,28 @@ function linkDriveFiles(){
       }
       if(!rows.length){ if(unmatched.length<25) unmatched.push(job.folder+': '+name); return; }
       rows.forEach(function(rowIdx){
-        var cur=String(vals[rowIdx][col]||''); if(cur.indexOf(file.getId())>=0) return;   // already linked
-        sh.getRange(rowIdx+1,col+1).setValue(file.getUrl()); vals[rowIdx][col]=file.getUrl(); linked++;
+        var slot=desired[col][rowIdx];
+        if(!slot){ desired[col][rowIdx]={url:file.getUrl(),name:name}; return; }
+        if(slot.name===name) return;                                         // same file seen twice — ignore
+        var a={url:file.getUrl(),name:name};                                 // two DIFFERENT files claim one row+column
+        var keep=(name.localeCompare(slot.name)<0)?a:slot, drop=(keep===a)?slot:a;
+        desired[col][rowIdx]=keep;
+        if(dups.length<25) dups.push(job.folder+': "'+keep.name+'"  · also · "'+drop.name+'"');
       });
     });
   });
-  var msg='Linked '+linked+' link(s) from '+scanned+' PDF(s) across the four folders.';
+  // AUTHORITATIVE pass: for every data row × every managed column, set the matched link or CLEAR a stale Drive link.
+  var linked=0, cleared=0;
+  for(var rr=hr+1;rr<vals.length;rr++){
+    for(var fn in managed){ var ci=managed[fn];
+      var want=(desired[ci]&&desired[ci][rr])?desired[ci][rr].url:'';
+      var cur=String(vals[rr][ci]||'');
+      if(want){ if(cur!==want){ sh.getRange(rr+1,ci+1).setValue(want); vals[rr][ci]=want; linked++; } }
+      else if(cur && /drive\.google\.com/i.test(cur)){ sh.getRange(rr+1,ci+1).setValue(''); vals[rr][ci]=''; cleared++; }
+    }
+  }
+  var msg='Linked/updated '+linked+' link(s), cleared '+cleared+' stale link(s), from '+scanned+' PDF(s) across the four folders.';
+  if(dups.length) msg+='\n\nDuplicate files — kept one, remove the extra:\n • '+dups.join('\n • ');
   if(unmatched.length) msg+='\n\nNo tracker match (check the ID in the filename):\n • '+unmatched.join('\n • ');
   return msg;
 }
