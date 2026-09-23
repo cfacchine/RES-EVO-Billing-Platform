@@ -361,7 +361,7 @@ function folderChild_(parent,name){ var it=parent.getFoldersByName(name); return
 function cleanName_(s){ return String(s==null?'':s).replace(/[\\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').trim(); }
 /* Naming scheme — the leading ID is the match key that links the file to its tracker row; the rest
    is Operator - Pad/Location - Category - Billing Unit. Filing structure:
-   EWS Billing / <Year> / <765 · Operations | 755 · Equipment> / <1 · PO Requests | 2 · Customer POs |
+   EWS Billing / <765 · Operations | 755 · Equipment> / <1 · PO Requests | 2 · Customer POs |
    3 · Invoices | 4 · Signed Invoices>. The linker classifies each file by its NAME, so layout can change
    freely; folders named with a leading "_" (e.g. _Trash - Review, _Needs Review) are skipped. Examples:
      Invoice     : "Invoice 50494 - Ascent - Charley Pad - Rig Up - 765.pdf"
@@ -381,8 +381,8 @@ function pdfFileName_(p,action){
   if(action==='custpo')  return cleanName_((p.po||p.poReq||'doc')+tail)+'.pdf';
   return cleanName_((p.poReq||'doc')+tail)+'.pdf';   // 'po' → PO Request file
 }
-/* Structure: EWS Billing / <Year> / <765 · Operations | 755 · Equipment> / <stage> , where stage is the
-   document's step in the flow. Files whose unit is unknown fall back to <Year> (no unit/stage subfolder). */
+/* Structure (no year level, 2026-09-23): EWS Billing / <765 · Operations | 755 · Equipment> / <stage>, where
+   stage is the document's step in the flow. Files whose unit is unknown land in the EWS Billing root. */
 function stageFolder_(action){
   return action==='invoice' ? '3 · Invoices'
        : action==='signed'  ? '4 · Signed Invoices'
@@ -390,11 +390,33 @@ function stageFolder_(action){
        :                       '1 · PO Requests';   // 'po' = PO request
 }
 function billingFolder_(root,p,action){
-  var d=p.date?new Date(p.date):new Date(); if(isNaN(d.getTime())) d=new Date();
-  var f=folderChild_(root,String(d.getFullYear()));                     // EWS Billing / <Year>
-  var uf=unitFolder_(p.unit); if(!uf) return f;                          // unit unknown → leave at Year level
-  f=folderChild_(f,uf);                                                  // …/<765 · Operations | 755 · Equipment>
-  return folderChild_(f,stageFolder_(action));                          // …/<stage>
+  var uf=unitFolder_(p.unit); if(!uf) return root;                       // unit unknown → EWS Billing root
+  return folderChild_(folderChild_(root,uf),stageFolder_(action));       // EWS Billing / <unit> / <stage>
+}
+/* ONE-TIME (2026-09-23): remove the Year level. Moves everything under EWS Billing/<Year>/… up one level,
+   merging into EWS Billing/<unit>/<stage> when those folders already exist, then trashes the emptied Year
+   folder. Nothing is deleted except empty folders; name clashes are kept (both files) and reported.
+   Run ▸ flattenYearFoldersPreview first (changes nothing), then Run ▸ flattenYearFolders, then linkDriveFiles. */
+function flattenYearFoldersPreview(){ var r=flattenYears_(true); Logger.log(r); return r; }
+function flattenYearFolders(){ var r=flattenYears_(false); Logger.log(r); return r; }
+function flattenYears_(preview){
+  var root=DriveApp.getFolderById(DRIVE_ROOT), log=[], moved=0, clashes=[];
+  function mergeInto(src,dst,path){
+    var fs=src.getFiles();
+    while(fs.hasNext()){ var f=fs.next(), nm=f.getName();
+      if(dst.getFilesByName(nm).hasNext()) clashes.push(path+'/'+nm);
+      if(!preview) f.moveTo(dst); moved++; }
+    var ds=src.getFolders();
+    while(ds.hasNext()){ var sub=ds.next(), it=dst.getFoldersByName(sub.getName());
+      if(it.hasNext()) mergeInto(sub,it.next(),path+'/'+sub.getName());
+      else { log.push((preview?'would move ':'moved ')+path+'/'+sub.getName()+'/ → EWS Billing'+path.replace(/^\/\d{4}/,'')+'/'); if(!preview) sub.moveTo(dst); } }
+    if(!preview && !src.getFiles().hasNext() && !src.getFolders().hasNext() && src.getId()!==DRIVE_ROOT) src.setTrashed(true);
+  }
+  var years=root.getFolders();
+  while(years.hasNext()){ var y=years.next(); if(!/^\d{4}$/.test(y.getName())) continue;
+    log.push((preview?'WOULD flatten ':'Flattened ')+'EWS Billing/'+y.getName()+'/'); mergeInto(y,root,'/'+y.getName()); }
+  if(!preview) bustCache_();
+  return log.join('\n')+'\nFiles '+(preview?'to move: ':'moved: ')+moved+(clashes.length?'\nSame-name files now side by side (check):\n • '+clashes.join('\n • '):'');
 }
 function savePdf_(p,action){
   if(!p.pdfB64) return '';
@@ -822,10 +844,9 @@ function scanInbox_(preview){
                  disc:cellVal_(vals[rowIdx],m,A.disc), unit:cellVal_(vals[rowIdx],m,A.unit),
                  inv:docNo, po:cellVal_(vals[rowIdx],m,A.po), poReq:docNo, date:msg.getDate() };  // fields from the matched tracker row
         var fname=pdfFileName_(rp,action);                                       // SIGNED - Invoice … / EWSO-PO-… scheme
-        var year=String((msg.getDate()||new Date()).getFullYear());
-        var uf=unitFolder_(rp.unit), where=year+(uf?' / '+uf+' / '+stageFolder_(action):'');
+        var uf=unitFolder_(rp.unit), where=uf?(uf+' / '+stageFolder_(action)):'EWS Billing (unit unknown)';
         if(preview){ filed.push(fname+'  →  '+where+'   (from '+String(msg.getFrom()).replace(/.*</,'').replace('>','')+')'); return; }
-        var folder=billingFolder_(root,rp,action);                               // EWS Billing / <Year> / <unit> / <stage>
+        var folder=billingFolder_(root,rp,action);                               // EWS Billing / <unit> / <stage>
         var ex=folder.getFilesByName(fname); while(ex.hasNext()) ex.next().setTrashed(true);
         var url=folder.createFile(atts[0].copyBlob().setName(fname)).getUrl();
         setCellByName_(sh,rowIdx,m,(kind==='signed')?A.sgnPdf:A.poPdf,url);
