@@ -191,7 +191,10 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
 .na-exp{padding:0 4px 12px}
 .na-exp .exp-inner{padding:10px 12px;border:1px solid var(--line-2);border-radius:9px;background:var(--card-2)}
 /* --- Pipeline: chevron + inline expand --- */
-.pipe-card{cursor:pointer}
+.pipe-card{cursor:pointer} .pipe-card[draggable="true"]{cursor:grab} .pipe-card.dragging{opacity:.45;outline:2px dashed var(--line-2,#c9d2cc);cursor:grabbing}
+.pipe-body.drop-ok{background:color-mix(in srgb,var(--green-bright,#2ea44f) 7%,transparent);border-radius:0 0 10px 10px}
+.pipe-reset{font-size:10.5px;color:var(--muted,#6b756e);text-decoration:none;margin-left:6px;white-space:nowrap} .pipe-reset:hover{color:var(--text);text-decoration:underline}
+.pipe-grip{color:var(--muted,#8a978f);font-size:11px;letter-spacing:-2px;margin-right:4px;cursor:grab;user-select:none}
 .pipe-left{display:flex;align-items:center;gap:6px}
 .pipe-chev{color:var(--muted-2);font-size:10px;transition:transform .15s;display:inline-block} .pipe-card.open .pipe-chev{transform:rotate(90deg)}
 .pipe-exp{margin-top:7px;border-top:1px solid var(--line-2);padding-top:2px}
@@ -496,7 +499,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
   @media(max-width:600px){.pipe-col{flex-basis:82vw;width:82vw}}
   </style>
   <section class="view" id="view-pipeline">
-    <div class="section-head"><div><div class="eyebrow">Workflow</div><h2 style="display:flex;align-items:center;flex-wrap:wrap">Pipeline<span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></h2><div class="sub">Every open item by stage, oldest first — each card shows the one next step, click it to advance. Shows all open work regardless of the period filter.</div></div></div>
+    <div class="section-head"><div><div class="eyebrow">Workflow</div><h2 style="display:flex;align-items:center;flex-wrap:wrap">Pipeline<span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></h2><div class="sub">Every open item by stage, oldest first — each card shows the one next step, click it to advance. <b>Drag a card</b> (⋮⋮) to reorder its column; the order is shared with everyone. Shows all open work regardless of the period filter.</div></div></div>
     <div class="pipe-board"><div class="pipe-cols" id="pipeCols"></div></div>
   </section>
 
@@ -815,6 +818,7 @@ function applyConfig(b){
        var ops=cl(ls&&ls.operators), dsc=cl(ls&&ls.disc);
        if(ops.length) OPERATORS=ops;
        if(dsc.length) DISC=dsc; }catch(e){}
+  try{ if(b&&b.pipeOrder&&typeof b.pipeOrder==="object"){ PIPE_ORDER=b.pipeOrder; try{ localStorage.setItem("revo-pipeorder",JSON.stringify(PIPE_ORDER)); }catch(e){} } }catch(e){}
   try{ if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
 }
 /* #8: after a save the backend returns the saved row — patch it into the dashboard instead of re-downloading everything. */
@@ -1432,20 +1436,59 @@ function pipeActions(x){
   else if(s==="signed"){ b.push(["Mark paid","editRow("+id+",'paid','Yes')",1]); }
   return b;
 }
+/* ---- Drag-and-drop order within a pipeline column (saved to the backend for everyone) ---- */
+var PIPE_ORDER=(function(){ try{ return JSON.parse(localStorage.getItem("revo-pipeorder")||"{}")||{}; }catch(e){ return {}; } })();
+function pipeKey(x){ return x.inv ? "i:"+String(x.inv).trim() : (x.poReq ? "r:"+String(x.poReq).trim() : ""); }
+function applyPipeOrder(stage,list){
+  var ord=PIPE_ORDER[stage]; if(!ord||!ord.length) return list;
+  var pos={}; ord.forEach(function(k,i){ pos[k]=i; });
+  return list.slice().sort(function(a,b){ var pa=pos[pipeKey(a)], pb=pos[pipeKey(b)];
+    if(pa==null&&pb==null) return 0; if(pa==null) return -1; if(pb==null) return 1; return pa-pb; });   // new items (never ordered) stay on top, oldest first
+}
+function savePipeOrder(stage,keys){
+  if(keys&&keys.length) PIPE_ORDER[stage]=keys; else delete PIPE_ORDER[stage];
+  try{ localStorage.setItem("revo-pipeorder",JSON.stringify(PIPE_ORDER)); }catch(e){}
+  if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"pipeorder",payload:{stage:stage,keys:keys||[]}})
+    .then(function(j){ if(j&&j.ok===false) throw 0; }).catch(function(){ toast("Couldn’t save the new order to the sheet","warn"); });
+}
+function resetPipeOrder(stage){ savePipeOrder(stage,[]); renderPipeline(); toast("Column back to oldest-first"); }
+var _pipeDrag=null;
+function initPipeDnD(host){
+  if(host._dnd) return; host._dnd=1;
+  host.addEventListener("dragstart",function(e){ var c=e.target.closest&&e.target.closest(".pipe-card[draggable]"); if(!c) return;
+    _pipeDrag={el:c,stage:c.dataset.stage,dropped:false}; c.classList.add("dragging");
+    try{ e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain",c.dataset.key); }catch(_){} });
+  host.addEventListener("dragover",function(e){ if(!_pipeDrag) return; var body=e.target.closest&&e.target.closest(".pipe-body");
+    host.querySelectorAll(".pipe-body.drop-ok").forEach(function(b){ if(b!==body) b.classList.remove("drop-ok"); });
+    if(!body||body.dataset.stage!==_pipeDrag.stage) return;                        // reorder within a column only
+    e.preventDefault(); try{ e.dataTransfer.dropEffect="move"; }catch(_){} body.classList.add("drop-ok");
+    var cards=[].slice.call(body.querySelectorAll(".pipe-card:not(.dragging)")), after=null;
+    for(var i=0;i<cards.length;i++){ var r=cards[i].getBoundingClientRect(); if(e.clientY<r.top+r.height/2){ after=cards[i]; break; } }
+    if(after) body.insertBefore(_pipeDrag.el,after); else body.appendChild(_pipeDrag.el); });
+  host.addEventListener("drop",function(e){ if(!_pipeDrag) return; var body=e.target.closest&&e.target.closest(".pipe-body");
+    if(!body||body.dataset.stage!==_pipeDrag.stage) return; e.preventDefault(); _pipeDrag.dropped=true;
+    var keys=[].slice.call(body.querySelectorAll(".pipe-card[data-key]")).map(function(c){return c.dataset.key;}).filter(Boolean);
+    savePipeOrder(_pipeDrag.stage,keys); });
+  host.addEventListener("dragend",function(){ if(!_pipeDrag) return; var d=_pipeDrag; _pipeDrag=null;
+    host.querySelectorAll(".pipe-body.drop-ok").forEach(function(b){ b.classList.remove("drop-ok"); });
+    d.el.classList.remove("dragging"); renderPipeline(); if(d.dropped) toast("Order saved"); });
+}
 function renderPipeline(){
   var host=document.getElementById("pipeCols"); if(!host) return;
   var groups={}; PIPE_STAGES.forEach(function(s){groups[s.key]=[];});
   (DATA.rows||[]).forEach(function(x){ (groups[pipeStage(x)] || (groups[pipeStage(x)]=[])).push(x); });
-  Object.keys(groups).forEach(function(k){ groups[k].sort(function(a,b){return (b.age||0)-(a.age||0);}); });
+  Object.keys(groups).forEach(function(k){ groups[k].sort(function(a,b){return (b.age||0)-(a.age||0);}); groups[k]=applyPipeOrder(k,groups[k]); });
+  initPipeDnD(host);
   host.innerHTML=PIPE_STAGES.map(function(s){
     var list=groups[s.key]||[], tot=list.reduce(function(a,x){return a+x.amount;},0);
-    var head='<div class="pipe-h" style="border-top:3px solid '+s.c+'"><div class="pipe-t" style="color:'+s.c+'">'+s.label+'</div><div class="pipe-s">'+s.sub+'</div><div class="pipe-n"><b>'+list.length+'</b> · '+money0(tot)+'</div></div>';
+    var head='<div class="pipe-h" style="border-top:3px solid '+s.c+'"><div class="pipe-t" style="color:'+s.c+'">'+s.label+'</div><div class="pipe-s">'+s.sub+'</div><div class="pipe-n"><b>'+list.length+'</b> · '+money0(tot)+((PIPE_ORDER[s.key]&&PIPE_ORDER[s.key].length&&s.key!=="paid")?'<a href="#" class="pipe-reset" title="Forget the custom order for this column" onclick="resetPipeOrder(\''+s.key+'\');return false;">↺ Reset order</a>':'')+'</div></div>';
     var body;
     if(s.key==="paid"){ body='<div class="pipe-paid"><b>'+list.length+'</b> invoices<br><b>'+money0(tot)+'</b> collected</div>'; }
     else if(!list.length){ body='<div class="pipe-empty">Nothing here</div>'; }
     else body=list.map(function(x){ var op=pipeOpen[x.id];
       var acts=pipeActions(x).map(function(a){return '<button class="pipe-btn'+(a[2]?" primary":"")+'" onclick="event.stopPropagation();'+a[1]+'">'+esc(a[0])+'</button>';}).join("");
-      return '<div class="pipe-card'+(op?" open":"")+dcls(x)+'" onclick="togglePipe('+x.id+')"><div class="pipe-card-top"><span class="pipe-left"><span class="pipe-chev">▶</span><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></span><span class="pipe-amt">'+money(x.amount)+'</span></div>'
+      var pk=pipeKey(x);
+      return '<div class="pipe-card'+(op?" open":"")+dcls(x)+'"'+(pk?' draggable="true" data-key="'+esc(pk)+'" data-stage="'+s.key+'" title="Drag to reorder"':'')+' onclick="togglePipe('+x.id+')"><div class="pipe-card-top"><span class="pipe-left">'+(pk?'<span class="pipe-grip" aria-hidden="true">⋮⋮</span>':'')+'<span class="pipe-chev">▶</span><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></span><span class="pipe-amt">'+money(x.amount)+'</span></div>'
         +'<div class="pipe-who">'+esc(x.operator||"—")+' · '+esc(x.location||"—")+'</div>'
         +'<div class="pipe-meta">'+starBtn(x)+esc(x.inv||x.poReq||"—")+' · Fleet '+esc(x.fleet||"—")+' · '+(x.age||0)+'d</div>'
         +(x.inboxFlag?'<div class="pipe-flag">📎 '+esc(x.inboxFlag)+'</div>':'')
@@ -1453,7 +1496,7 @@ function renderPipeline(){
         +(op?'<div class="pipe-exp">'+expInner(x, btnOpen(x.id)+btnRem(x.id))+'</div>':'')
         +'</div>';
     }).join("");
-    return '<div class="pipe-col">'+head+'<div class="pipe-body">'+body+'</div></div>';
+    return '<div class="pipe-col">'+head+'<div class="pipe-body" data-stage="'+s.key+'">'+body+'</div></div>';
   }).join("");
 }
 function togglePipe(id){ pipeOpen[id]=!pipeOpen[id]; renderPipeline(); }

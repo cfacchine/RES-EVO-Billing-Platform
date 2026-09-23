@@ -141,7 +141,23 @@ function getPending_(){
 }
 function getBootstrap_(){
   function safe(f){ try{ return f(); }catch(err){ return null; } }
-  return { schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_) };
+  return { schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_), pipeOrder:safe(getPipeOrder_) };
+}
+/* Pipeline drag-and-drop order, shared by everyone. One Script Property per stage ("PIPE_ORDER_<stage>")
+   holding a JSON list of card keys ("i:<invoice#>" or "r:<PO request#>"). Cards not in a list keep the default order. */
+var PIPE_PREFIX='PIPE_ORDER_';
+function getPipeOrder_(){
+  var all=PropertiesService.getScriptProperties().getProperties(), out={};
+  Object.keys(all).forEach(function(k){ if(k.indexOf(PIPE_PREFIX)===0){ try{ out[k.slice(PIPE_PREFIX.length)]=JSON.parse(all[k]); }catch(e){} } });
+  return out;
+}
+function setPipeOrder_(p){
+  var st=String(p.stage||''); if(!/^[a-z]{2,20}$/.test(st)) return false;
+  var keys=(Array.isArray(p.keys)?p.keys:[]).map(function(k){ return String(k).slice(0,40); }).filter(Boolean);
+  var props=PropertiesService.getScriptProperties();
+  if(!keys.length){ props.deleteProperty(PIPE_PREFIX+st); return true; }
+  var json=JSON.stringify(keys); while(json.length>8500 && keys.length){ keys.pop(); json=JSON.stringify(keys); }   // Script Property values cap at 9 KB
+  props.setProperty(PIPE_PREFIX+st, json); return true;
 }
 function doPost(e){
   var T0=Date.now(), TM={};                                                    // per-step timings → "_ms" in the reply
@@ -152,6 +168,7 @@ function doPost(e){
            TM.write=Date.now()-t1; bustCache_(); var rowN=(loc&&loc.row)?loc.row:loc, tab=(loc&&loc.tab)?loc.tab:WRITE_TAB;
            var t2=Date.now(), rec=rowRecord_(tab,rowN); TM.readBack=Date.now()-t2; TM.total=Date.now()-T0;
            return json_({ok:true,row:rowN,rec:rec,_ms:TM}); }                     // #8: send back the saved row
+         if(body.action==='pipeorder'){ var okp=setPipeOrder_(body.payload||{}); if(okp) bustCache_(); return json_({ok:okp}); }
          if(body.action==='update'){ var ok=updateRow_(body.payload||{}); if(ok) bustCache_(); TM.total=Date.now()-T0; return json_({ok:ok,_ms:TM}); }
          if(body.action==='delete'){ var dr=deleteDoc_(body.payload||{}); if(dr) bustCache_(); return json_({ok:!!dr,row:(dr||0),tab:WRITE_TAB}); }
          if(body.action==='tidy' && body.payload && body.payload.confirm==='TIDY'){ var msg=tidyBillingTracker_(false); bustCache_(); return json_({ok:true,msg:msg}); }
