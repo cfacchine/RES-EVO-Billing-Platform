@@ -90,7 +90,8 @@ function doGet(e){
   if(a==='lists')     return json_(getLists_());
   if(a==='emails')    return json_(getEmails_());
   if(a==='inspect')   return json_(inspect_());
-  if(a==='sheetstats') return json_(sheetStats_());                          // read-only workbook weight report (#9)
+  if(a==='sheetstats') return json_(sheetStats_());
+  if(a==='optimizePreview') return json_(optimizeTracker_(true));          // read-only dry run of #9                          // read-only workbook weight report (#9)
   if(a==='logins')    return json_(getLogins_(e));
   if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);          // #3: schedule+directory+lists+emails in ONE call
   return cachedJson_('sum', getSummary_, e);                                   // #1: cached summary
@@ -879,4 +880,79 @@ function linkDriveFiles(){
 function eachPdf_(folder,cb){
   var f=folder.getFilesByType(MimeType.PDF); while(f.hasNext()) cb(f.next());
   var subs=folder.getFolders(); while(subs.hasNext()) eachPdf_(subs.next(),cb);   // recurse Year → 765/755 unit subfolders → any depth
+}
+
+/* ============================ #9 WORKBOOK OPTIMIZE (one-time, 2026-09-23) ============================
+   1) Backs up the whole workbook (Drive copy) before touching anything.
+   2) Billing Tracker: replaces the per-row formulas in Days Outstanding / Due Date / Aging Bucket with ONE
+      ARRAYFORMULA in each header cell — only when every row has the same formula and it's array-safe.
+      Afterwards it recomputes and compares every value to the old per-row results; any mismatch → that
+      column is automatically put back exactly as it was.
+   3) Deletes the unused "Billing Tracker (Clean)" tab — only if no formula anywhere refers to it.
+   Run ▸ optimizeTrackerPreview first (changes nothing), then Run ▸ optimizeTracker. */
+var OPT_COLS = [['days outstanding'],['due date'],['aging bucket']];
+var OPT_DROP_TAB = 'Billing Tracker (Clean)';
+var OPT_SAFE_FN = ['IF','IFS','IFERROR','IFNA','REGEXMATCH','REGEXEXTRACT','REGEXREPLACE','TODAY','VALUE','N','TEXT','DATEVALUE',
+                   'ROUND','ROUNDUP','ROUNDDOWN','INT','ABS','LEN','TRIM','UPPER','LOWER','ISBLANK','ISNUMBER','ISTEXT','ISERROR','ARRAYFORMULA'];
+function optimizeTrackerPreview(){ var r=optimizeTracker_(true); Logger.log(JSON.stringify(r,null,2)); return r; }
+function optimizeTracker(){ var r=optimizeTracker_(false); Logger.log(JSON.stringify(r,null,2)); return r; }
+function optArrayify_(f,colIdx1,firstRow){
+  // f is an R1C1 formula like =IF(RC1="","",TODAY()-RC1). Every same-row ref becomes an A1 open range (A2:A).
+  var body=f.replace(/^=/,''), parts=body.split(/("(?:[^"]|"")*")/), bad=null;
+  for(var i=0;i<parts.length;i+=2){                                          // even parts are outside string literals
+    var seg=parts[i];
+    if(/!/.test(seg)) { bad='references another tab'; break; }
+    (seg.match(/\b([A-Z][A-Z0-9\.]*)\s*\(/g)||[]).forEach(function(fn){ fn=fn.replace(/\s*\($/,''); if(OPT_SAFE_FN.indexOf(fn)<0) bad=bad||('uses '+fn+'() which is not array-safe'); });
+    parts[i]=seg.replace(/(^|[^A-Za-z0-9_])R(\[-?\d+\]|\d+)?C(\[-?\d+\]|\d+)?(?![A-Za-z0-9_\[])/g,function(m,pre,r,c){
+      if(r && r!=='[0]') { bad=bad||'refers to a different row'; return m; }
+      var col = !c ? colIdx1 : (c.charAt(0)==='[' ? colIdx1+Number(c.slice(1,-1)) : Number(c));
+      var L=colLetter_(col-1); return pre+L+firstRow+':'+L;                    // same-row ref → open column range (A1)
+    });
+  }
+  return bad ? {ok:false, why:bad} : {ok:true, body:parts.join('')};
+}
+function optimizeTracker_(preview){
+  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB), out={preview:!!preview, columns:[], dropTab:null};
+  var h=hdrInfo_(sh); if(!h) return {error:'Billing Tracker header row not found'};
+  var first=h.hr+2, maxR=sh.getMaxRows(), n=maxR-first+1;
+  if(!preview){ out.backup=DriveApp.getFileById(BOOK_ID).makeCopy('EWS Billing Tracker — backup before optimize '+Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'yyyy-MM-dd HH:mm')).getUrl(); }
+  OPT_COLS.forEach(function(names){
+    var ci=col_(h.m,names), rep={column:names[0]};
+    if(ci<0){ rep.skip='column not found'; out.columns.push(rep); return; }
+    var hdrCell=sh.getRange(h.hr+1,ci+1); rep.cell=colLetter_(ci)+(h.hr+1);
+    if(/ARRAYFORMULA/i.test(hdrCell.getFormula())){ rep.skip='already an array formula'; out.columns.push(rep); return; }
+    var rg=sh.getRange(first,ci+1,n,1), fR1=rg.getFormulasR1C1().map(function(r){return r[0];}), vals=rg.getValues().map(function(r){return r[0];});
+    var distinct={}, consts=0, rowsWithF=0;
+    fR1.forEach(function(f,i){ if(f){ distinct[f]=(distinct[f]||0)+1; rowsWithF++; } else if(String(vals[i])!=='') consts++; });
+    var keys=Object.keys(distinct); rep.rowsWithFormula=rowsWithF; rep.distinctFormulas=keys.length; rep.typedValues=consts;
+    if(keys.length!==1){ rep.skip=keys.length?'rows use different formulas':'no formulas'; rep.samples=keys.slice(0,3); out.columns.push(rep); return; }
+    if(consts>0){ rep.skip=consts+' row(s) have typed values instead of the formula — left alone so nothing is overwritten'; out.columns.push(rep); return; }
+    var conv=optArrayify_(keys[0],ci+1,first);
+    rep.oldFormulaR1C1=keys[0];
+    if(!conv.ok){ rep.skip=conv.why; out.columns.push(rep); return; }
+    var hdrText=String(hdrCell.getValue()), header=hdrText.replace(/"/g,'""');
+    rep.newFormula='={"'+header+'";ARRAYFORMULA('+conv.body+')}';
+    if(preview){ rep.action='would convert'; out.columns.push(rep); return; }
+    // apply → verify → auto-revert on any mismatch
+    var before=rg.getDisplayValues().map(function(r){return r[0];});
+    rg.clearContent(); hdrCell.setFormula(rep.newFormula); SpreadsheetApp.flush();
+    var after=rg.getDisplayValues().map(function(r){return r[0];}), bad=0, badRows=[];
+    for(var i=0;i<n;i++){ if(fR1[i] && before[i]!==after[i]){ bad++; if(badRows.length<5) badRows.push((first+i)+': '+before[i]+' → '+after[i]); } }
+    if(bad){ hdrCell.setValue(hdrText); rg.setFormulasR1C1(fR1.map(function(f){return [f];})); SpreadsheetApp.flush();   // exact restore
+      rep.action='REVERTED — '+bad+' value(s) differed'; rep.mismatches=badRows; }
+    else rep.action='converted — all '+rowsWithF+' values identical';
+    out.columns.push(rep);
+  });
+  // drop the unused copy tab, only if nothing points at it
+  var drop=ss.getSheetByName(OPT_DROP_TAB);
+  if(!drop) out.dropTab={tab:OPT_DROP_TAB, skip:'not found'};
+  else {
+    var refs=0; ss.getSheets().forEach(function(s2){ if(s2.getName()===OPT_DROP_TAB) return; var lr=s2.getLastRow(), lc=s2.getLastColumn(); if(lr<1||lc<1) return;
+      s2.getRange(1,1,lr,lc).getFormulas().forEach(function(r){ r.forEach(function(x){ if(x && x.indexOf(OPT_DROP_TAB)>=0) refs++; }); }); });
+    if(refs) out.dropTab={tab:OPT_DROP_TAB, skip:refs+' formula(s) refer to it — kept'};
+    else if(preview) out.dropTab={tab:OPT_DROP_TAB, action:'would delete (nothing refers to it)'};
+    else { ss.deleteSheet(drop); out.dropTab={tab:OPT_DROP_TAB, action:'deleted'}; }
+  }
+  if(!preview) bustCache_();
+  return out;
 }
