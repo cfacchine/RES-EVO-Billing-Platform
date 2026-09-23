@@ -742,8 +742,9 @@ async function loadData(manual){
     _loading=true;
     setStatus(_failN?"is-warn":"is-wait", _failN?"Reconnecting…":"Connecting…");
     try{
-      var j=await fetch(CONFIG.EXEC_URL+"?action=summary").then(function(r){return r.json();});
+      var j=await fetch(CONFIG.EXEC_URL+"?action=summary"+(manual?"&fresh=1":"")).then(function(r){return r.json();});   // manual Refresh skips the server cache
       if(j&&j.rows){ LIVE_PAID = !!(j.rows.length && Object.prototype.hasOwnProperty.call(j.rows[0],"paid")); DATA.rows=toRows(j.rows.map(function(r){return COLS.map(function(c){return r[c];});}));
+        DATA.rows.forEach(function(o,i){ o._row=j.rows[i]._row; o._tab=j.rows[i]._tab; });   // sheet position → lets a save patch just its row (#8)
         LIVE=true; _failN=0; setStatus("is-live","Live · sheet"); demoOff(); renderAll(); _loading=false;   // paint the sheet immediately — don't block the dashboard on the config fetches
         loadLiveConfig().then(function(){ renderAll(); });   // rates / directory / operator+disc lists / CC lists load in parallel in the background, then one refresh
         if(manual) toast("Refreshed from the live sheet"); return; }
@@ -762,8 +763,17 @@ async function loadData(manual){
 async function loadLiveConfig(){
   var base=CONFIG.EXEC_URL;
   var gj=function(a){ return fetch(base+"?action="+a).then(function(r){return r.json();}).catch(function(){return null;}); };
-  var r=await Promise.all([gj("schedule"),gj("directory"),gj("lists"),gj("emails")]);   // 4 config calls in parallel — one round-trip, not four
-  var sc=r[0], dr=r[1], ls=r[2], em=r[3];
+  try{ var cached=JSON.parse(localStorage.getItem("revo-boot")||"null"); if(cached) applyConfig(cached); }catch(e){}   // last known config → instant
+  var b=await gj("bootstrap");                                                       // #3: one call for all four
+  if(!(b && ("schedule" in b || "directory" in b))){                                // older backend → fall back to 4 calls
+    var r=await Promise.all([gj("schedule"),gj("directory"),gj("lists"),gj("emails")]);
+    b={schedule:r[0],directory:r[1],lists:r[2],emails:r[3]};
+  }
+  applyConfig(b);
+  try{ localStorage.setItem("revo-boot",JSON.stringify(b)); }catch(e){}
+}
+function applyConfig(b){
+  var sc=b&&b.schedule, dr=b&&b.directory, ls=b&&b.lists, em=b&&b.emails;
   try{ if(sc&&Array.isArray(sc['755'])&&sc['755'].length) RATES['755']=sc['755'];
        if(sc&&Array.isArray(sc['765'])&&sc['765'].length) RATES['765']=sc['765']; }catch(e){}
   try{ if(dr&&dr.fleets&&dr.fleets.length){ DIRECTORY.length=0; dr.fleets.forEach(function(f){DIRECTORY.push(f);}); } }catch(e){}
@@ -773,6 +783,19 @@ async function loadLiveConfig(){
        if(dsc.length) DISC=dsc; }catch(e){}
   try{ if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
 }
+/* #8: after a save the backend returns the saved row — patch it into the dashboard instead of re-downloading everything. */
+function applyRec(rec){
+  if(!rec) return false;
+  try{
+    var o=toRows([COLS.map(function(c){return rec[c];})])[0]; o._row=rec._row; o._tab=rec._tab;
+    var i=DATA.rows.findIndex(function(r){ return r._row&&r._row===rec._row&&r._tab===rec._tab; });
+    if(i<0 && rec.inv) i=DATA.rows.findIndex(function(r){ return String(r.inv||"").trim()===String(rec.inv).trim(); });
+    if(i>=0){ o.id=DATA.rows[i].id; DATA.rows[i]=o; }
+    else { o.id=DATA.rows.reduce(function(m,r){return Math.max(m,r.id);},-1)+1; DATA.rows.push(o); }
+    renderAll(); return true;
+  }catch(e){ return false; }
+}
+function afterWrite(res){ if(!(res&&res.rec&&applyRec(res.rec))) loadData(); }   // old backend (no rec) → full reload
 function setStatus(state,text){
   var el=document.getElementById("dataStatus");
   if(el){ el.classList.remove("is-live","is-wait","is-warn"); el.classList.add(state); }
@@ -1567,7 +1590,7 @@ function saveBuilder(v){
   if(!CONFIG.EXEC_URL){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved on this device."); return; }
   toast("Saving changes to "+num+"…");
   postToSheet({action:"save",payload:recd}).then(function(res){
-    if(res&&res.ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved to the sheet."); loadData(); }
+    if(res&&res.ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved to the sheet."); afterWrite(res); }
     else if(res&&res.error){ ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here, but the sheet reported: "+res.error+"  (Redeploy the web app to enable saving changes to the sheet.)"); }
     else { ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here.  Redeploy the web app (new version) to save changes straight to the sheet."); }
   }).catch(function(err){
@@ -1595,7 +1618,7 @@ async function generate(v){
   try{ var blob=await docPdfBlob(v); if(blob) recd.pdfB64=await blobToB64(blob); }catch(e){}   // attach the exact PDF for the Drive save
   postToSheet({action:isInv?"invoice":"po",payload:recd}).then(function(res){
     if(res&&res.error){ toast("Saved on this device, but the sheet reported: "+res.error,"warn"); }
-    else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"+(recd.pdfB64?" + PDF filed in Drive":"")); loadData(); }
+    else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"+(recd.pdfB64?" + PDF filed in Drive":"")); afterWrite(res); }
   }).catch(function(err){
     toast("No clean reply from the sheet — checking whether "+num+" saved…");
     verifyOnSheet(isInv?num:"", isInv?"":num).then(function(ok){
@@ -1879,7 +1902,12 @@ function deleteEntry(id){
   try{ [x.poReq,x.inv].forEach(function(k){ if(k) localStorage.removeItem(recKey(k)); }); }catch(e){}
   if(CONFIG.EXEC_URL){
     postToSheet({action:"delete",payload:{inv:x.inv,poReq:x.poReq}}).then(function(res){
-      if(res&&res.ok){ toast("Deleted "+(x.inv||x.poReq||"entry")+" from the sheet"); loadData(); }
+      if(res&&res.ok){ toast("Deleted "+(x.inv||x.poReq||"entry")+" from the sheet");
+        if(typeof res.row==="number"&&res.row>0){                                    // #8: drop it locally, shift rows below it up one
+          DATA.rows=DATA.rows.filter(function(r){return r.id!==id;});
+          DATA.rows.forEach(function(r){ if(r._tab===res.tab&&r._row>res.row) r._row--; });
+          renderAll();
+        } else loadData(); }
       else if(res&&res.error){ toast("Delete failed: "+res.error,"warn"); }
       else { toast("That entry wasn’t found in the current Billing Tracker to delete — click Refresh and try again","warn"); }
     }).catch(function(){ toast("Couldn’t reach the web app to delete","warn"); });

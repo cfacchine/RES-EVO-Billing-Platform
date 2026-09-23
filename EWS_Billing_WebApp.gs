@@ -91,16 +91,56 @@ function doGet(e){
   if(a==='emails')    return json_(getEmails_());
   if(a==='inspect')   return json_(inspect_());
   if(a==='logins')    return json_(getLogins_(e));
-  return json_(getSummary_());
+  if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);          // #3: schedule+directory+lists+emails in ONE call
+  return cachedJson_('sum', getSummary_, e);                                   // #1: cached summary
+}
+/* ============================ SERVER CACHE (perf #1/#3, 2026-09-23) ============================
+   Responses are cached in CacheService, keyed on the workbook's Drive "last modified" stamp plus a
+   generation counter that every write through this web app bumps. Any change to the sheet — a save
+   here, a trigger, or a hand edit in Google Sheets — changes the key, so stale data is never served.
+   Values are chunked because CacheService caps each value at 100 KB. Add &fresh=1 to bypass. */
+var CACHE_TTL = 21600;                // 6 h max; freshness comes from the key, not the TTL
+var CHUNK = 80000;
+function cacheStamp_(){
+  var c=CacheService.getScriptCache(), gen=c.get('gen')||'0', mod='';
+  try{ mod=String(DriveApp.getFileById(BOOK_ID).getLastUpdated().getTime()); }catch(e){ mod=String(Math.floor(Date.now()/60000)); }  // fallback: 1-min buckets
+  return mod+'.'+gen;
+}
+function bustCache_(){ try{ var c=CacheService.getScriptCache(); c.put('gen', String(Date.now()), CACHE_TTL); }catch(e){} }
+function cachePutBig_(key,str){
+  var c=CacheService.getScriptCache(), parts={}, n=Math.ceil(str.length/CHUNK)||1;
+  for(var i=0;i<n;i++) parts[key+'_'+i]=str.substr(i*CHUNK,CHUNK);
+  parts[key+'_n']=String(n);
+  try{ c.putAll(parts, CACHE_TTL); }catch(e){}
+}
+function cacheGetBig_(key){
+  var c=CacheService.getScriptCache(), n=Number(c.get(key+'_n')||0); if(!n) return null;
+  var ks=[]; for(var i=0;i<n;i++) ks.push(key+'_'+i);
+  var got=c.getAll(ks), out=''; for(var j=0;j<n;j++){ if(got[ks[j]]==null) return null; out+=got[ks[j]]; }
+  return out;
+}
+function cachedJson_(name, builder, e){
+  var fresh = e && e.parameter && e.parameter.fresh;
+  var key = name+'@'+cacheStamp_();
+  if(!fresh){ var hit=cacheGetBig_(key); if(hit) return ContentService.createTextOutput(hit).setMimeType(ContentService.MimeType.JSON); }
+  var str=JSON.stringify(builder());
+  cachePutBig_(key,str);
+  return ContentService.createTextOutput(str).setMimeType(ContentService.MimeType.JSON);
+}
+function getBootstrap_(){
+  function safe(f){ try{ return f(); }catch(err){ return null; } }
+  return { schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_) };
 }
 function doPost(e){
   try{ var body=JSON.parse(e.postData.contents); var lock=LockService.getScriptLock(); lock.tryLock(20000);
-    try{ if(body.action==='po'||body.action==='invoice') return json_({ok:true,row:appendDoc_(body.payload||{},body.action)});
-         if(body.action==='logLogin') return json_({ok:true,row:logLogin_(body.payload||{})});
-         if(body.action==='save') return json_({ok:true,row:saveDoc_(body.payload||{})});
-         if(body.action==='update') return json_({ok:updateRow_(body.payload||{})});
-         if(body.action==='delete') return json_({ok:deleteDoc_(body.payload||{})});
-         if(body.action==='tidy' && body.payload && body.payload.confirm==='TIDY') return json_({ok:true,msg:tidyBillingTracker_(false)});
+    try{ if(body.action==='logLogin') return json_({ok:true,row:logLogin_(body.payload||{})});
+         if(body.action==='po'||body.action==='invoice'||body.action==='save'){
+           var loc=(body.action==='save')?saveDoc_(body.payload||{}):appendDoc_(body.payload||{},body.action);
+           bustCache_(); var rowN=(loc&&loc.row)?loc.row:loc, tab=(loc&&loc.tab)?loc.tab:WRITE_TAB;
+           return json_({ok:true,row:rowN,rec:rowRecord_(tab,rowN)}); }                     // #8: send back the saved row
+         if(body.action==='update'){ var ok=updateRow_(body.payload||{}); if(ok) bustCache_(); return json_({ok:ok}); }
+         if(body.action==='delete'){ var dr=deleteDoc_(body.payload||{}); if(dr) bustCache_(); return json_({ok:!!dr,row:(dr||0),tab:WRITE_TAB}); }
+         if(body.action==='tidy' && body.payload && body.payload.confirm==='TIDY'){ var msg=tidyBillingTracker_(false); bustCache_(); return json_({ok:true,msg:msg}); }
          return json_({error:'unknown action'}); }
     finally{ lock.releaseLock(); }
   }catch(err){ return json_({error:String(err)}); }
@@ -114,12 +154,18 @@ function getSummary_(){
     var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
     var hr=trackerHeaderRow_(vals); if(hr<0) return; var m=hdr_(vals[hr]);
     var ci=mapCols_(m);
-    for(var r=hr+1;r<vals.length;r++){ var v=vals[r], inv=g_(v,ci.inv), amt=g_(v,ci.amount), poReq=g_(v,ci.poReq);
-      if(!inv && !amt && !poReq) continue;
+    for(var r=hr+1;r<vals.length;r++){ var rec=summaryRow_(vals[r],ci,name,r+1); if(rec) out.push(rec); }
+  });
+  return { rows:out };
+}
+/* One tracker row → the summary record the dashboard uses. _row/_tab let the dashboard patch a single record in place. */
+function summaryRow_(v,ci,name,rowNum){
+      var inv=g_(v,ci.inv), amt=g_(v,ci.amount), poReq=g_(v,ci.poReq);
+      if(!inv && !amt && !poReq) return null;
       var status=String(g_(v,ci.status)||'');
       var paid = (paid_(g_(v,ci.paid))==='Yes' || /paid|collected/i.test(status)) ? 'Yes':'No';
       var pk = parsePack_(g_(v,ci.lines));
-      out.push({ inv:String(inv||'').trim(), date:fmtDate_(g_(v,ci.date)), amount:Number(amt)||0,
+      return { inv:String(inv||'').trim(), date:fmtDate_(g_(v,ci.date)), amount:Number(amt)||0,
         start:pk.start||'', end:pk.end||'',
         signed:x_(g_(v,ci.signed)), poReq:String(poReq||''), poAssigned: g_(v,ci.po)?'Yes':x_(g_(v,ci.poAssigned)),
         reminderSent:x_(g_(v,ci.reminder)), paid:paid, invoiceStatus:status,
@@ -131,9 +177,17 @@ function getSummary_(){
         pdfUrl:String(g_(v,ci.invPdf)||g_(v,ci.poReqPdf)||''),
         poPdf:String(g_(v,ci.poPdf)||''), sgnPdf:String(g_(v,ci.sgnPdf)||''), inboxFlag:String(g_(v,ci.inbox)||''),
         lineItems:pk.lines, notes:(pk.notes || String(g_(v,ci.notes)||'')),
-        _tab:name }); }
-  });
-  return { rows:out };
+        _tab:name, _row:rowNum };
+}
+/* Read ONE tracker row and return its summary record (used after a save — #8). */
+function rowRecord_(tab,rowN){
+  try{ rowN=Number(rowN); if(!rowN) return null;
+    var sh=SpreadsheetApp.openById(BOOK_ID).getSheetByName(tab||WRITE_TAB); if(!sh) return null;
+    var lc=sh.getLastColumn(), top=sh.getRange(1,1,Math.min(sh.getLastRow(),15),lc).getValues();
+    var hr=trackerHeaderRow_(top); if(hr<0) return null;
+    var ci=mapCols_(hdr_(top[hr]));
+    return summaryRow_(sh.getRange(rowN,1,1,lc).getValues()[0],ci,tab||WRITE_TAB,rowN);
+  }catch(e){ return null; }
 }
 function mapCols_(m){
   var ci={}; Object.keys(A).forEach(function(k){ ci[k]=col_(m,A[k]); });
@@ -316,16 +370,9 @@ function appendDoc_(p,action){
   if(action==='invoice' && p.poReq){
     var found=poReqRowFree_(findRowByPoReq_(ss,p.poReq), p.inv);
     if(found){ var fm=ensureLineItemsCol_(found.sh,found.hr);
-      setCell_(found.sh,found.row,fm,A.inv,p.inv);
-      setCell_(found.sh,found.row,fm,A.amount,amount);
-      setCell_(found.sh,found.row,fm,A.po,p.po);
-      setCell_(found.sh,found.row,fm,A.lines,linesJson);
-      setCell_(found.sh,found.row,fm,A.notes,p.notes);
-      setCell_(found.sh,found.row,fm,A.fleet,p.fleet);
-      setCell_(found.sh,found.row,fm,A.cEmail,p.contactEmail);
-      setCell_(found.sh,found.row,fm,A.invPdf,pdfOk);
-      setCell_(found.sh,found.row,fm,A.status,'Invoiced');
-      return found.row;
+      new RowPatch_(found.sh,found.row,fm).set(A.inv,p.inv).set(A.amount,amount).set(A.po,p.po).set(A.lines,linesJson)
+        .set(A.notes,p.notes).set(A.fleet,p.fleet).set(A.cEmail,p.contactEmail).set(A.invPdf,pdfOk).set(A.status,'Invoiced').flush();
+      return {row:found.row, tab:found.sh.getName()};
     }
   }
   // Find the FIRST blank data row (key columns empty) so new entries slot in with the data —
@@ -348,16 +395,17 @@ function appendDoc_(p,action){
       fa=sh.getRange(target-1,1,1,lc2).getFormulas()[0], fh=sh.getRange(target,1,1,lc2).getFormulas()[0];
       for(var c=0;c<fa.length;c++){ if(fa[c]&&fa[c].charAt(0)==='='&&!(fh[c]&&fh[c].charAt(0)==='='))
         sh.getRange(target-1,c+1).copyTo(sh.getRange(target,c+1),SpreadsheetApp.CopyPasteType.PASTE_FORMULA,false); } } }catch(e){}
-  function setC(names,val){ var i=col_(m,names); if(i>=0 && val!==''&&val!=null) sh.getRange(target,i+1).setValue(val); }
-  setC(A.inv,p.inv); setC(A.date, safeDate_(p.date)); setC(A.amount,amount);
-  setC(A.unit, p.unit==='765'?'765 · Operations':'755 · Equipment');   // Billing Unit label (still carries 765/755 so reads stay correct)
-  setC(A.operator,p.operator); setC(A.location,p.location); setC(A.disc,p.disc); setC(A.fleet,p.fleet);
-  setC(A.poReq,p.poReq); setC(A.po,p.po); setC(A.lines,linesJson);
-  setC(A.cName,p.contactName||p.contact); setC(A.cEmail,p.contactEmail); setC(A.cPhone,p.contactPhone);
-  setC(action==='invoice'?A.invPdf:A.poReqPdf, pdfOk);
-  setC(A.status, action==='invoice'?'Invoiced':'Requested');
-  setC(A.notes, p.notes || [p.operator,p.location,p.disc].filter(Boolean).join(' - '));
-  return target;
+  new RowPatch_(sh,target,m)
+    .set(A.inv,p.inv).set(A.date, safeDate_(p.date)).set(A.amount,amount)
+    .set(A.unit, p.unit==='765'?'765 · Operations':'755 · Equipment')   // Billing Unit label (still carries 765/755 so reads stay correct)
+    .set(A.operator,p.operator).set(A.location,p.location).set(A.disc,p.disc).set(A.fleet,p.fleet)
+    .set(A.poReq,p.poReq).set(A.po,p.po).set(A.lines,linesJson)
+    .set(A.cName,p.contactName||p.contact).set(A.cEmail,p.contactEmail).set(A.cPhone,p.contactPhone)
+    .set(action==='invoice'?A.invPdf:A.poReqPdf, pdfOk)
+    .set(A.status, action==='invoice'?'Invoiced':'Requested')
+    .set(A.notes, p.notes || [p.operator,p.location,p.disc].filter(Boolean).join(' - '))
+    .flush();                                                            // one write for the whole row
+  return {row:target, tab:sh.getName()};
 }
 function safeDate_(v){ var d = v ? new Date(v) : new Date(); if(isNaN(d.getTime()) || d.getFullYear()<2020 || d.getFullYear()>2100) d=new Date(); return d; }
 
@@ -425,7 +473,7 @@ function deleteDoc_(p){
     var rInv=iInv>=0?String(vals[r][iInv]||'').trim().toLowerCase():'';
     var rPo =iPo>=0?String(vals[r][iPo]||'').trim().toLowerCase():'';
     var ok=(inv? rInv===inv : true) && (poReq? rPo===poReq : true) && ((inv&&rInv===inv)||(poReq&&rPo===poReq));
-    if(ok){ sh.deleteRow(r+1); return true; }
+    if(ok){ sh.deleteRow(r+1); return r+1; }   // row number (truthy) so the dashboard can shift its local row refs
   }
   return false;
 }
@@ -461,6 +509,19 @@ function poReqRowFree_(found,inv){
   var cur=String(found.sh.getRange(found.row,i+1).getValue()||'').trim();
   return (!cur || cur.toLowerCase()===inv.toLowerCase()) ? found : null;
 }
+/* #6: batch a row's cell writes. Changed columns are grouped into contiguous runs and each run is written
+   with ONE setValues call (typically 3–4 writes instead of ~15 single-cell writes). Columns that aren't being
+   changed are never touched, so formula / computed columns are left exactly as they are. */
+function RowPatch_(sh,row,m){ this.sh=sh; this.row=row; this.m=m; this.p={}; }
+RowPatch_.prototype.set=function(names,val){ var i=col_(this.m,names); if(i>=0 && val!=='' && val!=null) this.p[i]=val; return this; };
+RowPatch_.prototype.flush=function(){
+  var ks=Object.keys(this.p).map(Number).sort(function(a,b){return a-b;}); if(!ks.length) return;
+  var runs=[], cur=[ks[0]];
+  for(var i=1;i<ks.length;i++){ if(ks[i]===ks[i-1]+1) cur.push(ks[i]); else { runs.push(cur); cur=[ks[i]]; } }
+  runs.push(cur);
+  var self=this;
+  runs.forEach(function(r){ self.sh.getRange(self.row,r[0]+1,1,r.length).setValues([r.map(function(c){return self.p[c];})]); });
+};
 function setCell_(sh,row,m,names,val){ var i=col_(m,names); if(i>=0 && val!==''&&val!=null) sh.getRange(row,i+1).setValue(val); }
 function findRowByInv_(ss,inv){
   var res=null, q=String(inv).trim().toLowerCase();
@@ -479,22 +540,14 @@ function saveDoc_(p){
   if(!found && p.poReq) found = poReqRowFree_(findRowByPoReq_(ss,p.poReq), p.inv);   // PO Request row only if not another invoice's
   if(found){
     var fm=ensureLineItemsCol_(found.sh,found.hr);
-    setCell_(found.sh,found.row,fm,A.inv,p.inv);
-    setCell_(found.sh,found.row,fm,A.poReq,p.poReq);
-    setCell_(found.sh,found.row,fm,A.po,p.po);
-    setCell_(found.sh,found.row,fm,A.amount,amount);
-    setCell_(found.sh,found.row,fm,A.operator,p.operator);
-    setCell_(found.sh,found.row,fm,A.location,p.location);
-    setCell_(found.sh,found.row,fm,A.disc,p.disc);
-    setCell_(found.sh,found.row,fm,A.fleet,p.fleet);
-    setCell_(found.sh,found.row,fm,A.date,safeDate_(p.date));
-    setCell_(found.sh,found.row,fm,A.lines,linesJson);
-    setCell_(found.sh,found.row,fm,A.notes,p.notes);
-    setCell_(found.sh,found.row,fm,A.cName,p.contactName||p.contact);
-    setCell_(found.sh,found.row,fm,A.cEmail,p.contactEmail);
-    setCell_(found.sh,found.row,fm,A.cPhone,p.contactPhone);
-    setCell_(found.sh,found.row,fm,A.status, p.inv?'Invoiced':'Requested');
-    return found.row;
+    new RowPatch_(found.sh,found.row,fm)
+      .set(A.inv,p.inv).set(A.poReq,p.poReq).set(A.po,p.po).set(A.amount,amount)
+      .set(A.operator,p.operator).set(A.location,p.location).set(A.disc,p.disc).set(A.fleet,p.fleet)
+      .set(A.date,safeDate_(p.date)).set(A.lines,linesJson).set(A.notes,p.notes)
+      .set(A.cName,p.contactName||p.contact).set(A.cEmail,p.contactEmail).set(A.cPhone,p.contactPhone)
+      .set(A.status, p.inv?'Invoiced':'Requested')
+      .flush();                                                          // one write instead of ~15
+    return {row:found.row, tab:found.sh.getName()};
   }
   return appendDoc_(p, p.inv?'invoice':'po');   // not on the sheet yet → create it (no duplicate)
 }
