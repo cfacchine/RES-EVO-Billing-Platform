@@ -72,7 +72,7 @@ input[type=number]{-moz-appearance:textfield} input[type=number]::-webkit-outer-
 .tab[data-view="collections"]{--tc:#c9821a}
 .tab[data-view="eq"]{--tc:#0e9488}
 .tab[data-view="ops"]{--tc:#d2691e}
-.tab{--tc:var(--green);appearance:none;background:none;border:none;cursor:pointer;color:var(--muted);font-weight:600;font-size:13.5px;padding:10px 15px 8px;border-bottom:3px solid transparent;display:flex;align-items:center;gap:10px;white-space:nowrap;transition:color .15s}
+.tab{--tc:var(--green);appearance:none;text-decoration:none;background:none;border:none;cursor:pointer;color:var(--muted);font-weight:600;font-size:13.5px;padding:10px 15px 8px;border-bottom:3px solid transparent;display:flex;align-items:center;gap:10px;white-space:nowrap;transition:color .15s}
 .tab svg{width:18px;height:18px;padding:6px;box-sizing:content-box;border-radius:9px;color:var(--tc);background:var(--card-2);background:color-mix(in srgb,var(--tc) 15%,transparent);transition:.15s}
 .tab .tnum{font-family:"Archivo";font-weight:800;font-size:12px;letter-spacing:.05em;padding:5px 9px;border-radius:9px;color:var(--tc);background:var(--card-2);background:color-mix(in srgb,var(--tc) 15%,transparent);border:1px solid transparent;border-color:color-mix(in srgb,var(--tc) 32%,transparent)}
 .tab:hover{color:var(--text)} .tab:hover svg{background:color-mix(in srgb,var(--tc) 26%,transparent)}
@@ -343,12 +343,12 @@ table.data tbody tr:last-child td{border-bottom:none}
 </header>
 
 <nav class="tabs" role="tablist">
-  <button class="tab active" data-view="dashboard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
-  <button class="tab" data-view="tracker"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9h16M4 14h16M10 4v16"/></svg>Billing Tracker</button>
-  <button class="tab" data-view="pipeline"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h4v14H4zM10 5h4v10h-4zM16 5h4v6h-4z"/></svg>Pipeline</button>
-  <button class="tab" data-view="collections"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.3a2.6 2.6 0 0 0-2.5-1.6c-1.4 0-2.5.8-2.5 1.9s1 1.6 2.5 2 2.5.9 2.5 2-1.1 1.9-2.5 1.9a2.6 2.6 0 0 1-2.5-1.6M12 6.4v11.2"/></svg>Collections</button>
-  <button class="tab" data-view="eq"><span class="tnum">755</span>· Equipment</button>
-  <button class="tab" data-view="ops"><span class="tnum">765</span>· Operations</button>
+  <a class="tab active" href="#dashboard" data-view="dashboard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</a>
+  <a class="tab" href="#tracker" data-view="tracker"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9h16M4 14h16M10 4v16"/></svg>Billing Tracker</a>
+  <a class="tab" href="#pipeline" data-view="pipeline"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h4v14H4zM10 5h4v10h-4zM16 5h4v6h-4z"/></svg>Pipeline</a>
+  <a class="tab" href="#collections" data-view="collections"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.3a2.6 2.6 0 0 0-2.5-1.6c-1.4 0-2.5.8-2.5 1.9s1 1.6 2.5 2 2.5.9 2.5 2-1.1 1.9-2.5 1.9a2.6 2.6 0 0 1-2.5-1.6M12 6.4v11.2"/></svg>Collections</a>
+  <a class="tab" href="#equipment" data-view="eq"><span class="tnum">755</span>· Equipment</a>
+  <a class="tab" href="#operations" data-view="ops"><span class="tnum">765</span>· Operations</a>
 </nav>
 
 <div class="wrap">
@@ -1934,8 +1934,16 @@ function deleteEntry(id){
 }
 
 /* ============================ NAV / THEME / TOASTS ============================ */
-function switchView(v){ document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.dataset.view===v);}); document.querySelectorAll(".view").forEach(function(x){x.classList.remove("active");}); document.getElementById("view-"+v).classList.add("active"); if(v==="collections"&&document.getElementById("chaseTbl")) renderCollectionsView(); window.scrollTo({top:0,behavior:"smooth"}); }
-document.querySelectorAll(".tab").forEach(function(t){t.addEventListener("click",function(){switchView(t.dataset.view);});});
+/* ---- Linkable tabs: …/#dashboard  #tracker  #pipeline  #collections  #equipment  #operations ---- */
+var VIEW_SLUG={dashboard:"dashboard",tracker:"tracker",pipeline:"pipeline",collections:"collections",eq:"equipment",ops:"operations"};
+var SLUG_VIEW={dashboard:"dashboard",home:"dashboard",tracker:"tracker",billing:"tracker","billing-tracker":"tracker",pipeline:"pipeline",collections:"collections",equipment:"eq",eq:"eq","755":"eq",operations:"ops",ops:"ops","765":"ops"};
+function viewFromHash(){ var h=decodeURIComponent((location.hash||"").replace(/^#\/?/,"")).toLowerCase().trim(); return SLUG_VIEW[h]||null; }
+function setHash(v,replace){ var want="#"+(VIEW_SLUG[v]||v); if(location.hash!==want){ try{ history[replace?"replaceState":"pushState"](null,"",location.pathname+location.search+want); }catch(e){ location.hash=want; } } }
+function switchView(v,opt){ opt=opt||{}; if(!document.getElementById("view-"+v)) v="dashboard"; if(!opt.noHash) setHash(v); document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.dataset.view===v);}); document.querySelectorAll(".view").forEach(function(x){x.classList.remove("active");}); document.getElementById("view-"+v).classList.add("active"); if(v==="collections"&&document.getElementById("chaseTbl")) renderCollectionsView(); if(!opt.noScroll) window.scrollTo({top:0,behavior:"smooth"}); }
+document.querySelectorAll(".tab").forEach(function(t){t.addEventListener("click",function(e){ if(e.ctrlKey||e.metaKey||e.shiftKey||e.button!==0) return; e.preventDefault(); switchView(t.dataset.view);});});
+window.addEventListener("popstate",function(){ switchView(viewFromHash()||"dashboard",{noHash:true}); });
+window.addEventListener("hashchange",function(){ var v=viewFromHash(); if(v){ switchView(v,{noHash:true}); setHash(v,true); } });
+(function(){ var v=viewFromHash(); if(v&&v!=="dashboard") switchView(v,{noHash:true,noScroll:true}); if(v) setHash(v,true); })();
 function toggleTheme(){ var r=document.documentElement,cur=r.getAttribute("data-theme"),sysDark=window.matchMedia("(prefers-color-scheme:dark)").matches; var next; if(cur==="dark")next="light"; else if(cur==="light")next="dark"; else next=sysDark?"light":"dark"; r.setAttribute("data-theme",next); try{localStorage.setItem("revo-theme",next);}catch(e){} }
 (function(){ try{ var t=localStorage.getItem("revo-theme"); if(t) document.documentElement.setAttribute("data-theme",t); }catch(e){} })();
 function toast(msg,kind){ var w=document.getElementById("toasts"),el=document.createElement("div"); el.className="toast"+(kind==="warn"?" warn":""); el.innerHTML='<span class="td"></span><span>'+esc(msg)+'</span>'; w.appendChild(el); setTimeout(function(){el.style.opacity="0";el.style.transform="translateY(8px)";setTimeout(function(){el.remove();},250);},3600); }
