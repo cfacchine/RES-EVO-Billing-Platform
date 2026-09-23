@@ -314,7 +314,7 @@ function appendDoc_(p,action){
   var pdfUrl=savePdf_(p,action), pdfOk=(pdfUrl && pdfUrl.indexOf('ERR:')!==0)?pdfUrl:'';
 
   if(action==='invoice' && p.poReq){
-    var found=findRowByPoReq_(ss,p.poReq);
+    var found=poReqRowFree_(findRowByPoReq_(ss,p.poReq), p.inv);
     if(found){ var fm=ensureLineItemsCol_(found.sh,found.hr);
       setCell_(found.sh,found.row,fm,A.inv,p.inv);
       setCell_(found.sh,found.row,fm,A.amount,amount);
@@ -452,6 +452,15 @@ function findRowByPoReq_(ss,poReq){
     for(var r=hr+1;r<vals.length;r++){ if(String(vals[r][iP]).trim().toLowerCase()===q){ res={sh:sh,row:r+1,hr:hr}; return; } }
   }); return res;
 }
+/* A row found by PO Request # may be reused only if it has no Invoice # yet, or the SAME one.
+   (One PO Request can carry several invoices — never overwrite a different invoice's row.) 2026-09-23 */
+function poReqRowFree_(found,inv){
+  if(!found) return null; inv=String(inv||'').trim(); if(!inv) return found;
+  var m=hdr_(found.sh.getRange(found.hr+1,1,1,found.sh.getLastColumn()).getValues()[0]);
+  var i=col_(m,A.inv); if(i<0) return found;
+  var cur=String(found.sh.getRange(found.row,i+1).getValue()||'').trim();
+  return (!cur || cur.toLowerCase()===inv.toLowerCase()) ? found : null;
+}
 function setCell_(sh,row,m,names,val){ var i=col_(m,names); if(i>=0 && val!==''&&val!=null) sh.getRange(row,i+1).setValue(val); }
 function findRowByInv_(ss,inv){
   var res=null, q=String(inv).trim().toLowerCase();
@@ -466,8 +475,8 @@ function saveDoc_(p){
   var ss=SpreadsheetApp.openById(BOOK_ID);
   var amount=p.total!=null?Number(p.total):(p.lines||[]).reduce(function(a,l){return a+(Number(l.total)||0);},0);
   var linesJson=JSON.stringify({start:p.start||'', end:p.end||'', notes:p.notes||'', lines:(p.rawLines||p.lines||[])});
-  var found = p.poReq ? findRowByPoReq_(ss,p.poReq) : null;
-  if(!found && p.inv) found = findRowByInv_(ss,p.inv);
+  var found = p.inv ? findRowByInv_(ss,p.inv) : null;                                  // invoice # is the strongest key
+  if(!found && p.poReq) found = poReqRowFree_(findRowByPoReq_(ss,p.poReq), p.inv);   // PO Request row only if not another invoice's
   if(found){
     var fm=ensureLineItemsCol_(found.sh,found.hr);
     setCell_(found.sh,found.row,fm,A.inv,p.inv);

@@ -1570,7 +1570,13 @@ function saveBuilder(v){
     if(res&&res.ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved to the sheet."); loadData(); }
     else if(res&&res.error){ ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here, but the sheet reported: "+res.error+"  (Redeploy the web app to enable saving changes to the sheet.)"); }
     else { ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here.  Redeploy the web app (new version) to save changes straight to the sheet."); }
-  }).catch(function(){ ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here — couldn't reach the web app to update the sheet."); });
+  }).catch(function(err){
+    toast("No clean reply from the sheet — checking whether "+num+" saved…");
+    verifyOnSheet(isInv?s.inv:"", s.poReq).then(function(ok){
+      if(ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" is on the sheet (confirmed by re-reading it)."); loadData(); }
+      else ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here, but it isn't on the sheet yet ("+String(err&&err.message||err)+"). Try Save again in a minute.");
+    });
+  });
 }
 async function generate(v){
   var b=B[v], s=state[v], isInv=s.mode==="INVOICE", lines=docLines(v);
@@ -1590,10 +1596,27 @@ async function generate(v){
   postToSheet({action:isInv?"invoice":"po",payload:recd}).then(function(res){
     if(res&&res.error){ toast("Saved on this device, but the sheet reported: "+res.error,"warn"); }
     else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"+(recd.pdfB64?" + PDF filed in Drive":"")); loadData(); }
-  }).catch(function(){ toast("Saved on this device — couldn’t reach the web app to write the sheet","warn"); });
+  }).catch(function(err){
+    toast("No clean reply from the sheet — checking whether "+num+" saved…");
+    verifyOnSheet(isInv?num:"", isInv?"":num).then(function(ok){
+      if(ok){ toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet (confirmed)"); loadData(); }
+      else ackPopup("Not on the Sheet Yet", (isInv?"Invoice ":"PO Request ")+num+" is saved on this device but didn't reach the sheet ("+String(err&&err.message||err)+"). Use Save (not Generate) to retry — Generate would issue a new number.");
+    });
+  });
 }
 function blobToB64(blob){ return new Promise(function(res){ var fr=new FileReader(); fr.onload=function(){ res(String(fr.result).split(",")[1]||""); }; fr.onerror=function(){res("");}; fr.readAsDataURL(blob); }); }
 function collect(v){ var b=B[v],s=state[v],c=contactByName(s.contact)||{}; return {unit:b.key,billTo:CONFIG.BILLTO[b.key].name,fleet:s.fleet,operator:s.operator,location:s.location,disc:s.disc,workType:workType(s),contact:s.contact,contactInfo:s.contactInfo,contactName:s.contact,contactEmail:c.email||"",contactPhone:c.phone||"",start:s.start,end:s.end,date:s.date,poReq:s.poReq,po:s.po,inv:s.inv,mode:s.mode,notes:s.notes,rawLines:s.lines,lines:docLines(v),total:docLines(v).reduce(function(a,l){return a+l.total;},0)}; }
+/* A failed/garbled response doesn't mean the write failed — Apps Script often finishes the save anyway.
+   Re-read the sheet and look for the record before telling the user it didn't save (prevents duplicate re-generates). */
+async function verifyOnSheet(inv,poReq){
+  for(var i=0;i<3;i++){
+    await new Promise(function(r){setTimeout(r,i?5000:3000);});
+    try{ var j=await fetch(CONFIG.EXEC_URL+"?action=summary&t="+Date.now()).then(function(r){return r.json();});
+      var hit=((j&&j.rows)||[]).some(function(r){ return (inv&&String(r.inv||"").trim()===String(inv).trim()) || (!inv&&poReq&&String(r.poReq||"").trim()===String(poReq).trim()); });
+      if(hit) return true; }catch(e){}
+  }
+  return false;
+}
 async function postToSheet(body){ return fetch(CONFIG.EXEC_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)}).then(function(r){return r.json();}); }
 
 /* PO Request memory — persist the full builder record so Pull can restore Start/End/Notes/Contact/Fleet + line items (this browser). */
