@@ -94,7 +94,8 @@ function doGet(e){
   if(a==='optimizePreview') return json_(optimizeTracker_(true));          // read-only dry run of #9
   if(a==='verifyOptimize') return json_(verifyOptimize_());                  // read-only: compare G/Q/S to the pre-optimize backup                          // read-only workbook weight report (#9)
   if(a==='logins')    return json_(getLogins_(e));
-  if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);          // #3: schedule+directory+lists+emails in ONE call
+  if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);
+  if(a==='pending')   return cachedJson_('pend', getPending_, e);          // #10: small feed for the Fleet Tracker's Pending Invoices tab          // #3: schedule+directory+lists+emails in ONE call
   return cachedJson_('sum', getSummary_, e);                                   // #1: cached summary
 }
 /* ============================ SERVER CACHE (perf #1/#3, 2026-09-23) ============================
@@ -129,6 +130,13 @@ function cachedJson_(name, builder, e){
   var str=JSON.stringify(builder());
   cachePutBig_(key,str);
   return ContentService.createTextOutput(str).setMimeType(ContentService.MimeType.JSON);
+}
+/* #10: only what the Fleet Tracker needs — current-year invoices with an Invoice #, not paid and not signed. */
+function getPending_(){
+  var yr=Utilities.formatDate(new Date(),sheetTz_(),'yyyy'), rows=getSummary_().rows.filter(function(r){
+    return r.inv && r.paid!=='Yes' && r.signed!=='Yes' && String(r.date||'').slice(0,4)===yr; });
+  return { rows: rows.map(function(r){ return {inv:r.inv,date:r.date,amount:r.amount,fleet:r.fleet,operator:r.operator,location:r.location,
+    disc:r.disc,notes:String(r.notes||'').split('\n')[0],pdfUrl:r.pdfUrl,paid:r.paid,signed:r.signed}; }) };
 }
 function getBootstrap_(){
   function safe(f){ try{ return f(); }catch(err){ return null; } }
@@ -425,7 +433,10 @@ function appendDoc_(p,action){
     .flush();                                                            // one write for the whole row
   return {row:target, tab:sh.getName()};
 }
-function safeDate_(v){ var d = v ? new Date(v) : new Date(); if(isNaN(d.getTime()) || d.getFullYear()<2020 || d.getFullYear()>2100) d=new Date(); return d; }
+function safeDate_(v){                                              // "2026-09-23" → that calendar day in the sheet's zone
+  var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m){ try{ var p=Utilities.parseDate(m[0],sheetTz_(),'yyyy-MM-dd'); if(!isNaN(p.getTime())) return p; }catch(e){} }
+  var d = v ? new Date(v) : new Date(); if(isNaN(d.getTime()) || d.getFullYear()<2020 || d.getFullYear()>2100) d=new Date(); return d; }
 
 /*************************************************************************************************
  * TIDY THE BILLING TRACKER — trims the thousands of empty formula-template rows.
@@ -604,7 +615,11 @@ function parsePack_(v){ var s=String(v||'').trim(); if(!s) return {lines:[]};
   return {lines:[]}; }
 function x_(v){ var s=String(v||'').trim().toUpperCase(); return (s==='X'||s.charAt(0)==='Y'||s==='TRUE'||s==='1')?'Yes':'No'; }
 function paid_(v){ var s=String(v||'').trim().toLowerCase(); if(!s) return 'No'; if(s==='no'||s==='n'||s==='false'||s==='0') return 'No'; return 'Yes'; }
-function fmtDate_(d){ if(d instanceof Date) return Utilities.formatDate(d,Session.getScriptTimeZone(),'yyyy-MM-dd'); return d?String(d):''; }
+/* Dates are formatted in the SPREADSHEET's time zone (not the script's) so the dashboard shows exactly the
+   date that's in the cell — the two zones differ, which made every date read one day early (fixed 2026-09-23). */
+var SHEET_TZ_=null;
+function sheetTz_(){ if(!SHEET_TZ_){ try{ SHEET_TZ_=SpreadsheetApp.openById(BOOK_ID).getSpreadsheetTimeZone(); }catch(e){} SHEET_TZ_=SHEET_TZ_||Session.getScriptTimeZone(); } return SHEET_TZ_; }
+function fmtDate_(d){ if(d instanceof Date) return Utilities.formatDate(d,sheetTz_(),'yyyy-MM-dd'); return d?String(d):''; }
 function json_(o){ return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
 /*************************************************************************************************
