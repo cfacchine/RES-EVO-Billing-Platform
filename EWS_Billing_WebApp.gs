@@ -1,3 +1,9 @@
+/* ==== VERSION 2026.09.23-2 · built 2026-09-23 18:06 EDT · Job ID naming + 0 · Inbox + version stamp ==== */
+/*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
+    old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
+var CODE_VERSION='2026.09.23-2', CODE_BUILT='2026-09-23 18:06 EDT';
+function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
+
 /*************************************************************************************************
  * EWS BILLING — WEB APP BACKEND  (Google Apps Script)
  * Database for the REVO Billing Platform (index.html).
@@ -14,6 +20,7 @@
  *   GET  ?action=schedule   → 755 / 765 rate cards
  *   GET  ?action=directory  → Fleet Directory
  *   GET  ?action=inspect    → detected header→column map + sample rows for each tracker tab (verification)
+ *   GET  ?action=version    → {version, built} — which code the LIVE deployment is running
  *   POST {action:"po"|"invoice"|"update", payload}   → append / update the Billing Tracker tab
  *
  * DEPLOY:  Apps Script with access to the master workbook → Deploy → Web app → Execute as Me →
@@ -87,6 +94,7 @@ var A = {
 
 function doGet(e){
   var a=(e&&e.parameter&&e.parameter.action)||'summary';
+  if(a==='version')   return json_({version:CODE_VERSION, built:CODE_BUILT});
   if(a==='schedule')  return json_(getSchedule_());
   if(a==='directory') return json_(getDirectory_());
   if(a==='lists')     return json_(getLists_());
@@ -142,7 +150,7 @@ function getPending_(){
 }
 function getBootstrap_(){
   function safe(f){ try{ return f(); }catch(err){ return null; } }
-  return { schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_), pipeOrder:safe(getPipeOrder_) };
+  return { version:CODE_VERSION, built:CODE_BUILT, schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_), pipeOrder:safe(getPipeOrder_) };
 }
 /* Pipeline drag-and-drop order, shared by everyone. One Script Property per stage ("PIPE_ORDER_<stage>")
    holding a JSON list of card keys ("i:<invoice#>" or "r:<PO request#>"). Cards not in a list keep the default order. */
