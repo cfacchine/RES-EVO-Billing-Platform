@@ -1005,3 +1005,24 @@ function repairDueDate(){
   var v=verifyOptimize_(); Logger.log(JSON.stringify(v,null,2)); return v;
 }
 var A_ = { date:['invoice date','date','billing date'] };
+
+/* Due Date as ONE array formula (replaces whatever is in Q below the header), then checks every dated row
+   against the expected value (Invoice Date + the number in Payment Terms, default 60). 2026-09-23 */
+function fixDueDate(){
+  var sh=SpreadsheetApp.openById(BOOK_ID).getSheetByName(WRITE_TAB), h=hdrInfo_(sh);
+  var ci=col_(h.m,['due date']), ia=col_(h.m,['invoice date','date','billing date']), ip=col_(h.m,['payment terms','terms']);
+  if(ci<0||ia<0||ip<0) return 'columns not found';
+  var La=colLetter_(ia), Lp=colLetter_(ip), first=h.hr+2, maxR=sh.getMaxRows(), n=maxR-first+1;
+  var hdr=sh.getRange(h.hr+1,ci+1);
+  sh.getRange(first,ci+1,n,1).clearContent().setNumberFormat('m/d/yyyy');
+  hdr.setFormula('={"Due Date";ARRAYFORMULA(IF('+La+first+':'+La+'="","",TO_DATE('+La+first+':'+La+'+IFERROR(VALUE(REGEXEXTRACT('+Lp+first+':'+Lp+'&"","\\d+")),60))))}');
+  SpreadsheetApp.flush(); bustCache_();
+  var tz=sheetTz_(), A=sh.getRange(first,ia+1,n,1).getValues(), P=sh.getRange(first,ip+1,n,1).getValues(), Q=sh.getRange(first,ci+1,n,1).getValues();
+  var dated=0, ok=0, bad=[];
+  for(var i=0;i<n;i++){ var a=A[i][0]; if(!(a instanceof Date)) continue; dated++;
+    var m=String(P[i][0]||'').match(/\d+/), days=m?Number(m[0]):60, q=Q[i][0], ymd=Utilities.formatDate(a,tz,'yyyy-M-d').split('-').map(Number);
+    var exp=Utilities.formatDate(new Date(Date.UTC(ymd[0],ymd[1]-1,ymd[2]+days)),'UTC','yyyy-MM-dd');   // calendar-day math, DST-proof
+    if(q instanceof Date && Utilities.formatDate(q,tz,'yyyy-MM-dd')===exp) ok++;
+    else if(bad.length<8) bad.push((first+i)+': expected '+exp+' got '+q); }
+  var r={datedRows:dated, correct:ok, problems:bad}; Logger.log(JSON.stringify(r,null,2)); return r;
+}
