@@ -161,9 +161,13 @@ table.data tbody tr:last-child td{border-bottom:none}
 .yn-y{color:var(--ok);font-weight:600} .yn-n{color:var(--warn);font-weight:600}
 .paid-row{background:rgba(46,158,79,.09)}
 /* ☆ Draft (no PO yet, still estimating) — orange */
-table.data tbody tr.draft-row>td{background:#fbe9d4;background:color-mix(in srgb,#ea8a18 16%,var(--card))} .draft-row td:first-child{box-shadow:inset 3px 0 0 #ea8a18}
+/* same orange everywhere a starred draft appears */
+:root{--draft:#ea8a18}
+table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background:#fbe9d4;background:color-mix(in srgb,var(--draft) 16%,var(--card))} table.data tbody tr.is-draft>td:first-child{box-shadow:inset 3px 0 0 var(--draft)}
+.na-item.is-draft,.na-row.is-draft,.leak-li.is-draft{background:#fbe9d4;background:color-mix(in srgb,var(--draft) 16%,var(--card));box-shadow:inset 3px 0 0 var(--draft)}
+.pipe-card.is-draft{background:#fbe9d4 !important;background:color-mix(in srgb,var(--draft) 16%,var(--card)) !important;border-color:var(--draft) !important;box-shadow:inset 3px 0 0 var(--draft)}
 .star{background:none;border:0;padding:0 5px 0 0;margin:0;cursor:pointer;font-size:15px;line-height:1;color:var(--muted);opacity:.55;vertical-align:-1px;transition:color .15s,opacity .15s,transform .15s}
-.star:hover{opacity:1;color:#ea8a18;transform:scale(1.15)} .star.on{color:#ea8a18;opacity:1} .paid-row td:nth-child(2){text-decoration:line-through;opacity:.75}
+.star:hover{opacity:1;color:var(--draft);transform:scale(1.15)} .star.on{color:var(--draft);opacity:1} .paid-row td:nth-child(2){text-decoration:line-through;opacity:.75}
 .agecell{display:inline-flex;align-items:center;gap:7px} .agestripe{width:4px;height:14px;border-radius:2px;display:inline-block}
 .err-dot{color:var(--crit);font-weight:700}
 .chev{display:inline-block;transition:transform .15s;color:var(--muted-2);font-size:11px} tr.main.open .chev{transform:rotate(90deg)}
@@ -734,6 +738,12 @@ function toRows(arr){ return arr.map(function(r,ix){ var o={}; COLS.forEach(func
   o.sigAge = o.sentDate ? Math.max(0,Math.round((TODAY-new Date(o.sentDate+"T00:00:00"))/86400000)) : o.age;   // days since sent for signature
   return o; }); }
 function isPaid(x){ return x.paid==="Yes"; }
+/* ☆ Drafts: rows with no customer PO can be starred; starred rows are orange on every view. */
+function canDraft(x){ return !!x && !String(x.po||"").trim(); }
+function isDraft(x){ return canDraft(x) && x.draft==="Yes"; }
+function dcls(x){ return isDraft(x)?" is-draft":""; }
+function starBtn(x){ if(!canDraft(x)||x.id==null) return ""; var on=isDraft(x);
+  return '<button class="star'+(on?" on":"")+'" onclick="event.stopPropagation();toggleDraft('+x.id+')" title="'+(on?"Draft — click to unmark":"Mark as draft (pre-built, not sent yet)")+'" aria-label="'+(on?"Unmark draft":"Mark as draft")+'" aria-pressed="'+on+'">'+(on?"★":"☆")+'</button>'; }
 function needsSig(x){ return !isPaid(x) && x.signed!=="Yes"; }
 function needsPO(x){ return !isPaid(x) && x.poAssigned!=="Yes"; }
 
@@ -876,12 +886,12 @@ function renderNeeds(){
     if(x.reminderSent==="Yes") tags+='<span class="na-tag" style="background:var(--card-2);color:var(--muted)">Reminder sent</span>';
     var op=naOpen[x.id];
     var row='<div class="na-row" onclick="toggleNeed('+x.id+')"><span class="na-chev">▶</span><span class="na-flag" style="background:'+col(x)+'"></span>'
-      +'<div class="na-main"><b>#'+esc(x.inv)+' · '+esc(x.operator)+' – '+esc(x.location)+'</b>'
+      +'<div class="na-main"><b>'+starBtn(x)+'#'+esc(x.inv)+' · '+esc(x.operator)+' – '+esc(x.location)+'</b>'
       +'<div class="sub">Fleet #'+esc(x.fleet)+' · '+esc(x.disc)+' · '+x.age+' days</div><div class="na-tags">'+tags+'</div></div>'
       +'<span class="na-amt">'+money(x.amount)+'</span>'
       +'<span class="na-act">'+btnRem(x.id)+'</span></div>';
     var exp = op ? '<div class="na-exp">'+expInner(x, btnOpen(x.id)+btnRem(x.id))+'</div>' : '';
-    return '<div class="na-item'+(op?' open':'')+'">'+row+exp+'</div>';
+    return '<div class="na-item'+(op?' open':'')+dcls(x)+'">'+row+exp+'</div>';
   }).join("") || '<div style="color:var(--muted);font-size:13px;padding:8px 2px">Nothing needs attention in this period. 🎉</div>';
 }
 function toggleNeed(id){ naOpen[id]=!naOpen[id]; renderNeeds(); }
@@ -894,8 +904,8 @@ function renderReady(){
   if(card) card.style.display = r.length? "" : "none";
   if(!el) return;
   el.innerHTML = r.slice(0,8).map(function(x){
-    return '<div class="na-row"><span class="na-flag" style="background:var(--info)"></span>'
-      +'<div class="na-main"><b>'+esc(x.poReq)+' · '+esc(x.operator)+' – '+esc(x.location)+'</b>'
+    return '<div class="na-row'+dcls(x)+'"><span class="na-flag" style="background:var(--info)"></span>'
+      +'<div class="na-main"><b>'+starBtn(x)+esc(x.poReq)+' · '+esc(x.operator)+' – '+esc(x.location)+'</b>'
       +'<div class="sub">Fleet #'+esc(x.fleet)+' · '+esc(x.disc)+(x.po?' · PO '+esc(x.po):'')+' · '+x.age+' days · '+esc(x.unit)+'</div></div>'
       +'<span class="na-amt">'+money(x.amount)+'</span>'
       +'<span class="na-act"><button class="btn sm" onclick="buildInvoiceFromRow('+x.id+')">Build invoice ▸</button></span></div>';
@@ -1135,7 +1145,7 @@ function renderChase(open){
     if(ready) acts+='<button class="btn sm primary" onclick="buildInvoiceFromRow('+x.id+')">Invoice ▸</button> ';
     acts+='<button class="btn sm" onclick="reminder('+x.id+')" title="Draft the next reminder in the ladder">Reminder</button> ';
     acts+='<button class="btn sm" onclick="openRecord('+x.id+')" title="Open this record">Open</button>';
-    var main='<tr class="'+(op?"open":"")+'"><td style="cursor:pointer;text-align:center" onclick="toggleChase('+x.id+')" title="Show details"><span class="chev">▶</span></td><td>'+fmtDate(x.date)+'</td><td>'+esc(x.inv||x.poReq||"—")+'</td><td class="clip">'+esc(x.operator)+' – '+esc(x.location)+'</td><td class="c">'+esc(x.unit)+'</td><td class="r">'+money(x.amount)+'</td><td class="c">'+(x.age||0)+'d</td><td>'+rung+sent+'</td><td>'+block+'</td><td class="r" style="white-space:nowrap">'+acts+'</td></tr>';
+    var main='<tr class="'+(op?"open":"")+dcls(x)+'"><td style="cursor:pointer;text-align:center" onclick="toggleChase('+x.id+')" title="Show details"><span class="chev">▶</span></td><td>'+fmtDate(x.date)+'</td><td style="white-space:nowrap">'+starBtn(x)+esc(x.inv||x.poReq||"—")+'</td><td class="clip">'+esc(x.operator)+' – '+esc(x.location)+'</td><td class="c">'+esc(x.unit)+'</td><td class="r">'+money(x.amount)+'</td><td class="c">'+(x.age||0)+'d</td><td>'+rung+sent+'</td><td>'+block+'</td><td class="r" style="white-space:nowrap">'+acts+'</td></tr>';
     return op ? main+'<tr class="expand"><td colspan="10">'+expInner(x, '')+'</td></tr>' : main;
   }).join("") || '<tr><td colspan="10" class="sub" style="padding:14px 6px">Nothing outstanding. 🎉</td></tr>';
 }
@@ -1225,7 +1235,7 @@ function renderLeakGuard(){
       var trash='<button class="leak-x" title="Dismiss — checked, not a concern" onclick="dismissLeak(\''+dk+'\')"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button>';
       if(x.__gap) return '<div class="leak-li"><span>Invoice #'+esc(x.inv)+' — not present in the tracker</span><span class="li-right">'+trash+'</span></div>';
       var jump=(L.jump&&x.id!=null)?'<a href="#" onclick="switchView(\'dashboard\');openRecord('+x.id+');return false;">open ▸</a>':'';
-      return '<div class="leak-li"><span>'+esc(x.inv||x.poReq||"—")+' · '+esc(x.operator)+' – '+esc(x.location)+(x.amount?' · '+money(x.amount):'')+(x.age!=null?' · '+x.age+'d':'')+'</span><span class="li-right">'+jump+trash+'</span></div>';
+      return '<div class="leak-li'+dcls(x)+'"><span>'+starBtn(x)+esc(x.inv||x.poReq||"—")+' · '+esc(x.operator)+' – '+esc(x.location)+(x.amount?' · '+money(x.amount):'')+(x.age!=null?' · '+x.age+'d':'')+'</span><span class="li-right">'+jump+trash+'</span></div>';
     }).join("");
     return '<details class="leak"><summary><span class="leak-dot" style="background:'+sevcol+'"></span><b>'+esc(L.label)+'</b><span class="leak-cnt">'+cnt+'</span><span class="leak-amt">'+amt+'</span></summary><div class="leak-desc">'+esc(L.desc)+'</div>'+lis+'</details>';
   }).join("")+foot;
@@ -1374,9 +1384,9 @@ function renderDesk(){
   var astripe={"Current":"var(--green)","1-30":"var(--green-bright)","31-60":"var(--warn)","61-90":"#d2691e","90+":"var(--crit)"};
   document.getElementById("deskBody").innerHTML=rows.map(function(x){
     var op=deskOpen[x.id];
-    var main='<tr class="main '+(op?'open':'')+'" onclick="toggleDesk('+x.id+')">'
+    var main='<tr class="main '+(op?'open':'')+dcls(x)+'" onclick="toggleDesk('+x.id+')">'
       +'<td><span class="chev">▶</span></td><td class="mono">'+fmtDate(x.date)+'</td>'
-      +'<td class="mono">'+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
+      +'<td class="mono" style="white-space:nowrap">'+starBtn(x)+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
       +'<td class="clip" title="'+esc(x.operator)+'">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip" title="'+esc(x.location)+'">'+esc(x.location)+'</td><td class="clip" title="'+esc(x.disc)+'">'+(esc(x.disc)||"—")+'</td>'
       +'<td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
       +'<td class="r num">'+money(x.amount)+'</td>'
@@ -1432,9 +1442,9 @@ function renderPipeline(){
     else if(!list.length){ body='<div class="pipe-empty">Nothing here</div>'; }
     else body=list.map(function(x){ var op=pipeOpen[x.id];
       var acts=pipeActions(x).map(function(a){return '<button class="pipe-btn'+(a[2]?" primary":"")+'" onclick="event.stopPropagation();'+a[1]+'">'+esc(a[0])+'</button>';}).join("");
-      return '<div class="pipe-card'+(op?" open":"")+'" onclick="togglePipe('+x.id+')"><div class="pipe-card-top"><span class="pipe-left"><span class="pipe-chev">▶</span><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></span><span class="pipe-amt">'+money(x.amount)+'</span></div>'
+      return '<div class="pipe-card'+(op?" open":"")+dcls(x)+'" onclick="togglePipe('+x.id+')"><div class="pipe-card-top"><span class="pipe-left"><span class="pipe-chev">▶</span><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></span><span class="pipe-amt">'+money(x.amount)+'</span></div>'
         +'<div class="pipe-who">'+esc(x.operator||"—")+' · '+esc(x.location||"—")+'</div>'
-        +'<div class="pipe-meta">'+esc(x.inv||x.poReq||"—")+' · Fleet '+esc(x.fleet||"—")+' · '+(x.age||0)+'d</div>'
+        +'<div class="pipe-meta">'+starBtn(x)+esc(x.inv||x.poReq||"—")+' · Fleet '+esc(x.fleet||"—")+' · '+(x.age||0)+'d</div>'
         +(x.inboxFlag?'<div class="pipe-flag">📎 '+esc(x.inboxFlag)+'</div>':'')
         +'<div class="pipe-acts">'+acts+'</div>'
         +(op?'<div class="pipe-exp">'+expInner(x, btnOpen(x.id)+btnRem(x.id))+'</div>':'')
@@ -1896,9 +1906,8 @@ function renderTracker(){
     if(q){ var hay=(x.inv+" "+x.poReq+" "+x.location+" "+x.operator).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; }).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
   var ynSel=function(id,field,val){ return '<select class="tr-sel" onchange="editRow('+id+',\''+field+'\',this.value)"><option '+(val==="Yes"?"selected":"")+'>Yes</option><option '+(val!=="Yes"?"selected":"")+'>No</option></select>'; };
   document.getElementById("trackBody").innerHTML=rows.map(function(x){ var op=trackOpen[x.id];
-    var noPO=!String(x.po||"").trim(), isDraft=noPO&&x.draft==="Yes";
-    var star=noPO?'<button class="star'+(isDraft?" on":"")+'" onclick="toggleDraft('+x.id+')" title="'+(isDraft?"Draft — click to unmark":"Mark as draft (pre-built, not sent yet)")+'" aria-label="'+(isDraft?"Unmark draft":"Mark as draft")+'" aria-pressed="'+isDraft+'">'+(isDraft?"★":"☆")+'</button>':"";
-    var main='<tr class="'+(op?"open ":"")+(x.paid==="Yes"?"paid-row ":"")+(isDraft?"draft-row":"")+'">'
+    var star=starBtn(x);
+    var main='<tr class="'+(op?"open ":"")+(x.paid==="Yes"?"paid-row":"")+dcls(x)+'">'
     +'<td style="cursor:pointer;text-align:center" onclick="toggleTrack('+x.id+')" title="Show details"><span class="chev">▶</span></td>'
     +'<td class="mono">'+fmtDate(x.date)+'</td><td class="mono" style="white-space:nowrap">'+star+(esc(x.inv)||"—")+'</td><td class="mono">'+(esc(x.poReq)||"—")+'</td><td class="mono">'+(esc(x.po)||"—")+'</td>'
     +'<td class="clip" title="'+esc(x.operator)+'">'+esc(x.operator)+'</td><td class="mono">'+(esc(x.fleet)||"—")+'</td><td class="clip" title="'+esc(x.location)+'">'+esc(x.location)+'</td><td class="clip" title="'+esc(x.disc)+'">'+(esc(x.disc)||"—")+'</td><td><span class="unitbadge u'+x.unit+'">'+x.unit+'</span></td>'
@@ -1911,7 +1920,7 @@ function renderTracker(){
 }
 function toggleDraft(id){
   var row=DATA.rows.find(function(r){return r.id===id;}); if(!row) return;
-  row.draft=row.draft==="Yes"?"No":"Yes"; renderTracker();
+  row.draft=row.draft==="Yes"?"No":"Yes"; renderDash(); renderTracker();
   toast(row.draft==="Yes"?("Marked "+(row.inv?"#"+row.inv:row.poReq)+" as a draft"):("Draft mark removed"+(row.inv?" from #"+row.inv:"")));
   if(LIVE&&CONFIG.EXEC_URL) postToSheet({action:"update",payload:{inv:row.inv,poReq:row.poReq,field:"draft",value:row.draft}})
     .then(function(j){ if(j&&j.ok===false) throw 0; }).catch(function(){ toast("Couldn’t save the draft mark to the sheet","warn"); });
