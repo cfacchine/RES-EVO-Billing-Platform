@@ -167,6 +167,9 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
 .na-item.is-draft,.na-row.is-draft,.leak-li.is-draft{background:#fbe9d4;background:color-mix(in srgb,var(--draft) 16%,var(--card));box-shadow:inset 3px 0 0 var(--draft)}
 .pipe-card.is-draft{background:#fbe9d4 !important;background:color-mix(in srgb,var(--draft) 16%,var(--card)) !important;border-color:var(--draft) !important;box-shadow:inset 3px 0 0 var(--draft)}
 .star{background:none;border:0;padding:0 5px 0 0;margin:0;cursor:pointer;font-size:15px;line-height:1;color:var(--muted);opacity:.55;vertical-align:-1px;transition:color .15s,opacity .15s,transform .15s}
+.draft-key{display:inline-flex;align-items:center;gap:5px;margin-left:10px;padding:2px 9px 2px 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:1.5;letter-spacing:0;text-transform:none;white-space:nowrap;vertical-align:middle;color:#9a5a0c;background:#fbe9d4;background:color-mix(in srgb,var(--draft) 16%,var(--card));box-shadow:inset 3px 0 0 var(--draft);cursor:help}
+.draft-key .dk-star{color:var(--draft);font-size:12px} :root[data-theme="dark"] .draft-key{color:#f3b35c}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .draft-key{color:#f3b35c}}
 .star:hover{opacity:1;color:var(--draft);transform:scale(1.15)} .star.on{color:var(--draft);opacity:1} .paid-row td:nth-child(2){text-decoration:line-through;opacity:.75}
 .agecell{display:inline-flex;align-items:center;gap:7px} .agestripe{width:4px;height:14px;border-radius:2px;display:inline-block}
 .err-dot{color:var(--crit);font-weight:700}
@@ -377,12 +380,12 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
     <div class="kpis" id="kpis"></div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-h"><div class="na-head"><h3>Needs Attention</h3><span class="na-count" id="naCount">0</span></div><span class="eyebrow">Unsigned · Awaiting PO · Aging</span></div>
+      <div class="card-h"><div class="na-head"><h3>Needs Attention</h3><span class="na-count" id="naCount">0</span><span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></div><span class="eyebrow">Unsigned · Awaiting PO · Aging</span></div>
       <div class="card-b"><div class="na-list" id="naList"></div></div>
     </div>
 
     <div class="card" style="margin-bottom:16px;display:none" id="readyCard">
-      <div class="card-h"><div class="na-head"><h3>PO in hand — ready to invoice</h3><span class="na-count" id="readyCount" style="background:var(--info-bg);color:var(--info)">0</span></div><span class="eyebrow">PO assigned · not yet invoiced</span></div>
+      <div class="card-h"><div class="na-head"><h3>PO in hand — ready to invoice</h3><span class="na-count" id="readyCount" style="background:var(--info-bg);color:var(--info)">0</span><span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></div><span class="eyebrow">PO assigned · not yet invoiced</span></div>
       <div class="card-b"><div class="na-list" id="readyList"></div></div>
     </div>
 
@@ -427,7 +430,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
     </div>
 
     <div class="card">
-      <div class="card-h"><h3>Billing Desk</h3><span class="eyebrow" id="deskCount"></span></div>
+      <div class="card-h"><div class="na-head"><h3>Billing Desk</h3><span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></div><span class="eyebrow" id="deskCount"></span></div>
       <div class="card-b">
         <div class="toolbar">
           <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="fSearch" placeholder="Search invoice, PO request, location…" oninput="renderDesk()"></div>
@@ -448,7 +451,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
 
   <!-- BILLING TRACKER -->
   <section class="view" id="view-tracker">
-    <div class="section-head"><div><div class="eyebrow">Maintain</div><h2>Billing Tracker</h2><div class="sub">Mark <b>Paid</b> to close an invoice out — with or without a PO — and update <b>Signed</b>, <b>PO Assigned</b>, and <b>Reminder</b>. Saves to the sheet when live.</div></div></div>
+    <div class="section-head"><div><div class="eyebrow">Maintain</div><h2 style="display:flex;align-items:center;flex-wrap:wrap">Billing Tracker<span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></h2><div class="sub">Mark <b>Paid</b> to close an invoice out — with or without a PO — and update <b>Signed</b>, <b>PO Assigned</b>, and <b>Reminder</b>. Saves to the sheet when live.</div></div></div>
     <div class="card"><div class="card-b">
       <div class="toolbar">
         <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input type="text" id="tSearch" placeholder="Search invoice, PO request, location…" oninput="renderTracker()"></div>
@@ -493,7 +496,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
   @media(max-width:600px){.pipe-col{flex-basis:82vw;width:82vw}}
   </style>
   <section class="view" id="view-pipeline">
-    <div class="section-head"><div><div class="eyebrow">Workflow</div><h2>Pipeline</h2><div class="sub">Every open item by stage, oldest first — each card shows the one next step, click it to advance. Shows all open work regardless of the period filter.</div></div></div>
+    <div class="section-head"><div><div class="eyebrow">Workflow</div><h2 style="display:flex;align-items:center;flex-wrap:wrap">Pipeline<span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></h2><div class="sub">Every open item by stage, oldest first — each card shows the one next step, click it to advance. Shows all open work regardless of the period filter.</div></div></div>
     <div class="pipe-board"><div class="pipe-cols" id="pipeCols"></div></div>
   </section>
 
@@ -538,7 +541,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
       </div>
     </div>
     <div class="card" style="margin-bottom:16px">
-      <div class="card-h"><div class="na-head"><h3>Revenue-Leak Guard</h3><span class="na-count" id="leakCount" style="background:var(--crit)">0</span></div><span class="eyebrow" id="leakAtRisk">—</span></div>
+      <div class="card-h"><div class="na-head"><h3>Revenue-Leak Guard</h3><span class="na-count" id="leakCount" style="background:var(--crit)">0</span><span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></div><span class="eyebrow" id="leakAtRisk">—</span></div>
       <div class="card-b"><div id="leakBody"></div></div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -546,7 +549,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
       <div class="card-b"><div class="sub" style="margin-bottom:10px">Reads the live <b>RES·EVO Fleet Tracker</b> schedule and flags rig-ups &amp; rig-downs with no matching PO Request yet — a completed service should have an Operations PO within days, and every Rig Up should also have an Equipment Service PO. <a href="#" onclick="refreshSchedule();return false;">Refresh</a></div><div id="schedBody"></div></div>
     </div>
     <div class="card">
-      <div class="card-h"><div class="na-head"><h3>Chase List</h3><span class="na-count" id="chaseCount" style="background:var(--warn-bg);color:var(--warn)">0</span></div><span class="eyebrow">Ranked by $ × age · escalation rung · what's blocking</span></div>
+      <div class="card-h"><div class="na-head"><h3>Chase List</h3><span class="na-count" id="chaseCount" style="background:var(--warn-bg);color:var(--warn)">0</span><span class="draft-key" title="Items with no customer PO can be starred as drafts — click ☆ on a row to mark one"><span class="dk-star">★</span>Invoice Drafts</span></div><span class="eyebrow">Ranked by $ × age · escalation rung · what's blocking</span></div>
       <div class="card-b"><div class="tablewrap"><table class="data" id="chaseTbl">
         <thead><tr><th style="width:26px"></th><th>Date</th><th>Invoice / PO Req</th><th>Operator – Location</th><th class="c">Unit</th><th class="r">Amount</th><th class="c">Age</th><th>Rung</th><th>Blocking</th><th class="r">Actions</th></tr></thead>
         <tbody id="chaseBody"></tbody>
