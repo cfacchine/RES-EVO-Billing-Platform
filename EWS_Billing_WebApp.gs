@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.23-3 · built 2026-09-23 18:40 EDT · POR-OP/ES series, pre-POR history, better migration dates ==== */
+/* ==== VERSION 2026.09.23-4 · built 2026-09-23 18:55 EDT · rename report → "Drive Rename Log" tab, keep name details when the row is blank ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.23-3', CODE_BUILT='2026-09-23 18:40 EDT';
+var CODE_VERSION='2026.09.23-4', CODE_BUILT='2026-09-23 18:55 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1318,7 +1318,7 @@ var CLEANUP_DAY_='2026-09-22';                                        // created
 function renameToJobId_(preview){
   var X=trackerIndex_(); if(!X) return 'Billing Tracker tab not found.';
   var XP=null; try{ XP=trackerIndex_(TRK_TABS[1]); }catch(e){}
-  var root=DriveApp.getFolderById(DRIVE_ROOT), T0=Date.now(), done=[], skip=[], moved=0, n=0, timedOut=false, planned={};
+  var root=DriveApp.getFolderById(DRIVE_ROOT), T0=Date.now(), done=[], skip=[], moved=0, n=0, timedOut=false, planned={}, report=[];
   eachPdf_(root,function(f){
     if(timedOut) return; if(Date.now()-T0>300000){ timedOut=true; return; }   // stay under the 6-min limit; re-run to continue
     var name=f.getName(), ps=parseScheme_(name), c=null, src=X;
@@ -1326,9 +1326,11 @@ function renameToJobId_(preview){
       c=schemeClassify_(X,ps); if(!c.rows.length && XP){ c=schemeClassify_(XP,ps); src=XP; } }
     else { c=legacyClassify_(X,name); if((!c||!c.rows.length) && XP){ var cp=legacyClassify_(XP,name); if(cp&&cp.rows.length){ c=cp; src=XP; } } }
     n++;
-    if(!c || !c.rows.length){ skip.push(name+'  (no tracker match)'); return; }
+    if(!c || !c.rows.length){ skip.push(name+'  (no tracker match)'); report.push(['left as-is',name,'','','no tracker match']); return; }
     var p=rowFields_(src,c.rows[0],{});
     if(c.inv) p.inv=c.inv; if(c.po) p.po=c.po;
+    if(!p.operator && !p.location && !p.disc){ var tl=oldTail_(name,ps);            // blank tracker row (e.g. a $0 placeholder) → keep what the old name said
+      p.operator=tl[0]||''; p.location=tl[1]||''; p.disc=tl[2]||''; if(!p.unit) p.unit=tl[3]||''; }
     p.date=(c.action==='invoice'||c.action==='signed') ? (p.invDate||p.start) : (p.start||p.invDate);
     if(!p.date) p.date=isoDay_(f.getDateCreated());
     var fname=pdfFileName_(p,c.action); if(fname===name) return;
@@ -1337,14 +1339,36 @@ function renameToJobId_(preview){
     if(planned[key] || dest.getFilesByName(fname).hasNext()){ fname=fname.replace(/\.pdf$/i,' (2).pdf'); key=dest.getId()+'/'+fname; }
     planned[key]=true;
     var mv=dest.getId()!==cur.getId();
-    done.push(name+'\n     → '+(mv?(uf+' / '+stageFolder_(c.action)+' / '):'')+fname+(src===XP?'   [Prior Years row]':'')+(p.poReq?'':'   [no PO Request — pre-POR job]')+(c.note?'   ['+c.note+']':''));
+    var why=[src===XP?'Prior Years row':'', p.poReq?'':'no PO Request (pre-POR job)', c.note||'', ps?'re-dated':''].filter(Boolean).join('; ');
+    done.push(name+'\n     → '+(mv?(uf+' / '+stageFolder_(c.action)+' / '):'')+fname+(why?'   ['+why+']':''));
+    report.push([preview?'would rename':'renamed', name, fname, mv?(uf+' / '+stageFolder_(c.action)):'', why]);
     if(!preview){ f.setName(fname); if(mv){ f.moveTo(dest); moved++; } }
   });
   if(!preview && done.length) bustCache_();
   var out=(preview?'WOULD rename ':'Renamed ')+done.length+' of '+n+' PDF(s) checked'+(moved?(', moved '+moved+' to the right folder'):'')+(done.length?':\n • '+done.join('\n • '):'.');
   if(skip.length) out+='\n\nLeft as-is:\n • '+skip.join('\n • ');
   if(timedOut) out+='\n\n⏱ Stopped near the time limit — run it again to finish the rest.';
+  try{ writeRenameLog_(X.ss,report,preview); out='Full list → "Drive Rename Log" tab ('+report.length+' rows).\n'+(preview?'PREVIEW — nothing changed. ':'')+
+    done.length+' to rename, '+skip.length+' left as-is'+(timedOut?' (stopped at time limit — run again)':'')+'.\n\n'+out; }catch(e){}
   return out+(preview?'\n\n(preview only — nothing changed)':'');
+}
+/* The rename report doesn't fit the execution log — write it to a tab (replaced on every run). */
+function writeRenameLog_(ss,rows,preview){
+  var sh=ss.getSheetByName('Drive Rename Log')||ss.insertSheet('Drive Rename Log'); sh.clear();
+  var hdr=[['Result','Current name','New name','Moved to','Note']];
+  sh.getRange(1,1,1,5).setValues(hdr).setFontWeight('bold').setBackground('#111113').setFontColor('#ffffff'); sh.setFrozenRows(1);
+  sh.getRange(1,7).setValue((preview?'PREVIEW':'RUN')+' · '+Utilities.formatDate(new Date(),sheetTz_(),'yyyy-MM-dd HH:mm')+' · code '+CODE_VERSION);
+  if(rows.length){ sh.getRange(2,1,rows.length,5).setValues(rows);
+    rows.forEach(function(r,i){ if(r[0]==='left as-is') sh.getRange(i+2,1,1,5).setBackground('#FDECEA');
+      else if(/pre-POR/.test(r[4])) sh.getRange(i+2,1,1,5).setBackground('#FFF4E0'); }); }
+  sh.setColumnWidth(2,520); sh.setColumnWidth(3,560); sh.setColumnWidth(4,210); sh.setColumnWidth(5,300);
+}
+/* "Invoice 50503 - EQT - Porter North - Roustabout - 765.pdf" → [operator, location, work type, unit] */
+function oldTail_(name,ps){
+  var parts=String(name).replace(/\.pdf$/i,'').replace(/\s*\(\d+\)$/,'').split(' - ').map(function(x){ return x.trim(); });
+  var start=ps?(ps.job?3:2):1; if(!ps && /^\s*SIGNED\b/i.test(name)) start=2;
+  var t=parts.slice(start), unit=(t.length && /^(755|765)$/.test(t[t.length-1]))?t.pop():'';
+  return [t[0]||'', t[1]||'', t.slice(2).join(' - '), unit];
 }
 /* New-scheme name → {action, rows, inv, po} against an index. */
 function schemeClassify_(X,ps){
