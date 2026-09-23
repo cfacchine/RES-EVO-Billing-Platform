@@ -268,13 +268,25 @@ function seedEmailLists(){ emailListsSheet_(); return 'Email Lists tab is ready 
 var MONTHS_=['January','February','March','April','May','June','July','August','September','October','November','December'];
 function folderChild_(parent,name){ var it=parent.getFoldersByName(name); return it.hasNext()?it.next():parent.createFolder(name); }
 function cleanName_(s){ return String(s==null?'':s).replace(/[\\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').trim(); }
-/* Filenames — the leading ID is the match key that links the file back to its tracker row:
-   PO Request     : "<PO Request #> - <Operator> - <Location>.pdf"   e.g. "EWS-POR-000026 - Ascent - Charley Pad.pdf"
-   Invoice        : "Invoice <Invoice #> - <Operator> - <Location>.pdf"   e.g. "Invoice 50494 - Ascent - Charley Pad.pdf" */
+/* Naming scheme — the leading ID is the match key that links the file to its tracker row; the rest
+   is Operator - Pad/Location - Category - Billing Unit. Files are then sorted into a "765 · Operations"
+   or "755 · Equipment" subfolder under each Year. Examples:
+     Invoice     : "Invoice 50494 - Ascent - Charley Pad - Rig Up - 765.pdf"
+     Signed      : "SIGNED - Invoice 50494 - Ascent - Charley Pad - Rig Up - 765.pdf"
+     PO Request  : "EWS-POR-00022 - Ascent - Charley Pad - Rig Up - 765.pdf"
+     Customer PO : "EWSO-PO-2518 - Ascent - Charley Pad - Rig Up - 765.pdf" */
+function unitCode_(u){ u=String(u||''); return /765/.test(u)?'765':(/755/.test(u)?'755':''); }
+function unitFolder_(u){ var c=unitCode_(u); return c==='765'?'765 · Operations':(c==='755'?'755 · Equipment':''); }
+function schemeTail_(p){
+  var parts=[p.operator,p.location,p.disc,unitCode_(p.unit)].map(cleanName_).filter(Boolean);
+  return parts.length?(' - '+parts.join(' - ')):'';
+}
 function pdfFileName_(p,action){
-  var op=cleanName_(p.operator), loc=cleanName_(p.location), tail=(op?' - '+op:'')+(loc?' - '+loc:'');
+  var tail=schemeTail_(p);
   if(action==='invoice') return cleanName_('Invoice '+(p.inv||p.poReq||'doc')+tail)+'.pdf';
-  return cleanName_((p.poReq||'doc')+tail)+'.pdf';
+  if(action==='signed')  return cleanName_('SIGNED - Invoice '+(p.inv||p.poReq||'doc')+tail)+'.pdf';
+  if(action==='custpo')  return cleanName_((p.po||p.poReq||'doc')+tail)+'.pdf';
+  return cleanName_((p.poReq||'doc')+tail)+'.pdf';   // 'po' → PO Request file
 }
 function savePdf_(p,action){
   if(!p.pdfB64) return '';
@@ -283,6 +295,7 @@ function savePdf_(p,action){
     var d=p.date?new Date(p.date):new Date(); if(isNaN(d.getTime())) d=new Date();
     var top=(action==='invoice')?'Invoice Request':'PO Requests';                 // the manual EWS Billing folders
     var folder=folderChild_(folderChild_(root,top),String(d.getFullYear()));       // EWS Billing / <top> / <Year>
+    var uf=unitFolder_(p.unit); if(uf) folder=folderChild_(folder,uf);             // …/<Year>/<765 · Operations | 755 · Equipment>
     var fname=pdfFileName_(p,action);
     var ex=folder.getFilesByName(fname); while(ex.hasNext()){ ex.next().setTrashed(true); }   // keep one current version
     var file=folder.createFile(Utilities.newBlob(Utilities.base64Decode(p.pdfB64),'application/pdf',fname));
@@ -669,9 +682,13 @@ function scanInbox_(preview){
         if(!kind || rowIdx<0) return;
         var year=String((msg.getDate()||new Date()).getFullYear());
         var folderName=(kind==='signed')?INBOX.SIGNED_FOLDER:INBOX.POASSIGNED_FOLDER;
-        var fname=(kind==='signed')?('Invoice '+docNo+' - SIGNED.pdf'):(docNo+' - Approved PO.pdf');
-        if(preview){ filed.push(fname+'  →  '+folderName+' / '+year+'   (from '+String(msg.getFrom()).replace(/.*</,'').replace('>','')+')'); return; }
-        var folder=folderChild_(folderChild_(root,folderName),year);
+        var rp={ operator:cellVal_(vals[rowIdx],m,A.operator), location:cellVal_(vals[rowIdx],m,A.location),
+                 disc:cellVal_(vals[rowIdx],m,A.disc), unit:cellVal_(vals[rowIdx],m,A.unit),
+                 inv:docNo, po:cellVal_(vals[rowIdx],m,A.po), poReq:docNo };     // fields from the matched tracker row
+        var fname=pdfFileName_(rp,(kind==='signed')?'signed':'custpo');          // SIGNED - Invoice … / EWSO-PO-… scheme
+        var uf=unitFolder_(rp.unit);
+        if(preview){ filed.push(fname+'  →  '+folderName+' / '+year+(uf?' / '+uf:'')+'   (from '+String(msg.getFrom()).replace(/.*</,'').replace('>','')+')'); return; }
+        var folder=folderChild_(folderChild_(root,folderName),year); if(uf) folder=folderChild_(folder,uf);   // …/<Year>/<unit>
         var ex=folder.getFilesByName(fname); while(ex.hasNext()) ex.next().setTrashed(true);
         var url=folder.createFile(atts[0].copyBlob().setName(fname)).getUrl();
         setCellByName_(sh,rowIdx,m,(kind==='signed')?A.sgnPdf:A.poPdf,url);
@@ -690,6 +707,7 @@ function ensureInboxCols_(sh,hr){
   return hdr_(sh.getRange(hr+1,1,1,sh.getLastColumn()).getValues()[0]);
 }
 function setCellByName_(sh,rowIdx,m,names,val){ var c=col_(m,names); if(c>=0 && val!==''&&val!=null) sh.getRange(rowIdx+1,c+1).setValue(val); }
+function cellVal_(rowVals,m,names){ var c=col_(m,names); return c>=0?String(rowVals[c]==null?'':rowVals[c]):''; }
 function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
   sh.getRange(2,1,sh.getLastRow()-1,1).getValues().forEach(function(r){ if(r[0]) map[String(r[0])]=1; }); return map; }
 function inboxMarkSeen_(ss,id,label){ var sh=ss.getSheetByName(INBOX.LOG_TAB);
@@ -776,5 +794,5 @@ function linkDriveFiles(){
 /* walk a folder + its immediate (Year) subfolders, calling cb for each PDF */
 function eachPdf_(folder,cb){
   var f=folder.getFilesByType(MimeType.PDF); while(f.hasNext()) cb(f.next());
-  var subs=folder.getFolders(); while(subs.hasNext()){ var sf=subs.next().getFilesByType(MimeType.PDF); while(sf.hasNext()) cb(sf.next()); }
+  var subs=folder.getFolders(); while(subs.hasNext()) eachPdf_(subs.next(),cb);   // recurse Year → 765/755 unit subfolders → any depth
 }
