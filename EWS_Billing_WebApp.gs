@@ -440,40 +440,33 @@ function tidyBillingTracker_(preview){
 }
 
 function updateRow_(p){
-  var ss=SpreadsheetApp.openById(BOOK_ID), done=false;
+  if(!p.inv) return false;
+  var ss=SpreadsheetApp.openById(BOOK_ID);
   var isPaid=p.field==='paid';
   var target = p.field==='signed'?A.signed : p.field==='poAssigned'?['po assigned'] : isPaid?A.paid : A.reminder;
   var mark=(String(p.value).toLowerCase().charAt(0)==='y')?'Yes':'No';
-  TRK_TABS.forEach(function(name){ if(done) return; var sh=ss.getSheetByName(name); if(!sh||sh.getLastRow()<2) return;
-    var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues(); var hr=trackerHeaderRow_(vals); if(hr<0) return;
-    var m=hdr_(vals[hr]); var iInv=col_(m,A.inv), iCol=col_(m,target); if(iInv<0) return;
-    for(var r=hr+1;r<vals.length;r++){
-      if(p.inv && String(vals[r][iInv]).trim()===String(p.inv).trim()){
-        if(iCol>=0) sh.getRange(r+1,iCol+1).setValue(mark==='Yes'?(isPaid?'Yes':'X'):'');
-        if(isPaid){ var iSt=col_(m,A.status);
-          if(iSt>=0){ var cur=String(vals[r][iSt]||'').trim();
-            if(mark==='Yes') sh.getRange(r+1,iSt+1).setValue('Paid');
-            else if(/^paid$/i.test(cur)) sh.getRange(r+1,iSt+1).setValue(''); } }
-        done=true; return;
-      }
-    }
-  });
-  return done;
+  var f=findRowBy_(ss,A.inv,p.inv); if(!f) return false;                      // #7: one-column lookup
+  var iCol=col_(f.m,target);
+  if(iCol>=0) f.sh.getRange(f.row,iCol+1).setValue(mark==='Yes'?(isPaid?'Yes':'X'):'');
+  if(isPaid){ var iSt=col_(f.m,A.status);
+    if(iSt>=0){ var stc=f.sh.getRange(f.row,iSt+1), cur=String(stc.getValue()||'').trim();
+      if(mark==='Yes') stc.setValue('Paid');
+      else if(/^paid$/i.test(cur)) stc.setValue(''); } }
+  return true;
 }
 
 /* Delete a single erroneous entry — only from the current Billing Tracker tab (history is never touched). */
 function deleteDoc_(p){
-  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB); if(!sh||sh.getLastRow()<2) return false;
-  var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
-  var hr=trackerHeaderRow_(vals); if(hr<0) return false;
-  var m=hdr_(vals[hr]), iInv=col_(m,A.inv), iPo=col_(m,A.poReq);
+  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB); if(!sh) return false;
+  var h=hdrInfo_(sh); if(!h) return false;
   var inv=String(p.inv||'').trim().toLowerCase(), poReq=String(p.poReq||'').trim().toLowerCase();
   if(!inv && !poReq) return false;
-  for(var r=hr+1;r<vals.length;r++){
-    var rInv=iInv>=0?String(vals[r][iInv]||'').trim().toLowerCase():'';
-    var rPo =iPo>=0?String(vals[r][iPo]||'').trim().toLowerCase():'';
+  var iInv=col_(h.m,A.inv), iPo=col_(h.m,A.poReq);
+  var invs=keyCol_(sh,h.hr,iInv), pos=keyCol_(sh,h.hr,iPo), n=Math.max(invs.length,pos.length);   // #7: two key columns only
+  for(var r=0;r<n;r++){
+    var rInv=invs[r]||'', rPo=pos[r]||'';
     var ok=(inv? rInv===inv : true) && (poReq? rPo===poReq : true) && ((inv&&rInv===inv)||(poReq&&rPo===poReq));
-    if(ok){ sh.deleteRow(r+1); return r+1; }   // row number (truthy) so the dashboard can shift its local row refs
+    if(ok){ var rowN=h.hr+2+r; sh.deleteRow(rowN); return rowN; }   // row number (truthy) so the dashboard can shift its local row refs
   }
   return false;
 }
@@ -492,19 +485,40 @@ function ensureLineItemsCol_(sh,hr){
   if(col_(m,A.lines)<0){ var i=sh.getLastColumn(); sh.getRange(hr+1,i+1).setValue('Line Items'); m['line items']=i; }
   return m;
 }
-function findRowByPoReq_(ss,poReq){
-  var res=null, q=String(poReq).trim().toLowerCase();
-  TRK_TABS.forEach(function(name){ if(res) return; var sh=ss.getSheetByName(name); if(!sh||sh.getLastRow()<2) return;
-    var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues(); var hr=trackerHeaderRow_(vals); if(hr<0) return;
-    var m=hdr_(vals[hr]); var iP=col_(m,A.poReq); if(iP<0) return;
-    for(var r=hr+1;r<vals.length;r++){ if(String(vals[r][iP]).trim().toLowerCase()===q){ res={sh:sh,row:r+1,hr:hr}; return; } }
-  }); return res;
+/* ============================ FAST ROW LOOKUPS (perf #7, 2026-09-23) ============================
+   Instead of reading every column of every row, read the header block once per execution (memoized)
+   and then only the ONE key column being searched. Current tab first, history tab second. */
+var HDR_MEMO_={};
+function hdrInfo_(sh){
+  var k=sh.getName(); if(HDR_MEMO_[k]) return HDR_MEMO_[k];
+  if(sh.getLastRow()<2) return null;
+  var top=sh.getRange(1,1,Math.min(sh.getLastRow(),15),sh.getLastColumn()).getValues();
+  var hr=trackerHeaderRow_(top); if(hr<0) return null;
+  return (HDR_MEMO_[k]={hr:hr, m:hdr_(top[hr])});
 }
+function keyCol_(sh,hr,ci){                                   // values of one column, data rows only
+  var n=sh.getLastRow()-(hr+1); if(n<1||ci<0) return [];
+  return sh.getRange(hr+2,ci+1,n,1).getValues().map(function(r){return String(r[0]==null?'':r[0]).trim().toLowerCase();});
+}
+function findRowBy_(ss,names,val,tabs){
+  var q=String(val==null?'':val).trim().toLowerCase(); if(!q) return null;
+  var list=tabs||TRK_TABS;
+  for(var t=0;t<list.length;t++){
+    var sh=ss.getSheetByName(list[t]); if(!sh) continue;
+    var h=hdrInfo_(sh); if(!h) continue;
+    var ci=col_(h.m,names); if(ci<0) continue;
+    var idx=keyCol_(sh,h.hr,ci).indexOf(q);
+    if(idx>=0) return {sh:sh,row:h.hr+2+idx,hr:h.hr,m:h.m};
+  }
+  return null;
+}
+function findRowByPoReq_(ss,poReq){ return findRowBy_(ss,A.poReq,poReq); }
+function findRowByInv_(ss,inv){ return findRowBy_(ss,A.inv,inv); }
 /* A row found by PO Request # may be reused only if it has no Invoice # yet, or the SAME one.
    (One PO Request can carry several invoices — never overwrite a different invoice's row.) 2026-09-23 */
 function poReqRowFree_(found,inv){
   if(!found) return null; inv=String(inv||'').trim(); if(!inv) return found;
-  var m=hdr_(found.sh.getRange(found.hr+1,1,1,found.sh.getLastColumn()).getValues()[0]);
+  var m=found.m||hdrInfo_(found.sh).m;
   var i=col_(m,A.inv); if(i<0) return found;
   var cur=String(found.sh.getRange(found.row,i+1).getValue()||'').trim();
   return (!cur || cur.toLowerCase()===inv.toLowerCase()) ? found : null;
@@ -523,14 +537,6 @@ RowPatch_.prototype.flush=function(){
   runs.forEach(function(r){ self.sh.getRange(self.row,r[0]+1,1,r.length).setValues([r.map(function(c){return self.p[c];})]); });
 };
 function setCell_(sh,row,m,names,val){ var i=col_(m,names); if(i>=0 && val!==''&&val!=null) sh.getRange(row,i+1).setValue(val); }
-function findRowByInv_(ss,inv){
-  var res=null, q=String(inv).trim().toLowerCase();
-  TRK_TABS.forEach(function(name){ if(res) return; var sh=ss.getSheetByName(name); if(!sh||sh.getLastRow()<2) return;
-    var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues(); var hr=trackerHeaderRow_(vals); if(hr<0) return;
-    var m=hdr_(vals[hr]); var iI=col_(m,A.inv); if(iI<0) return;
-    for(var r=hr+1;r<vals.length;r++){ if(String(vals[r][iI]).trim().toLowerCase()===q){ res={sh:sh,row:r+1,hr:hr}; return; } }
-  }); return res;
-}
 /* Upsert a document by PO Request # (or Invoice #) — update the row in place if it exists, else write a new one. Never duplicates. */
 function saveDoc_(p){
   var ss=SpreadsheetApp.openById(BOOK_ID);
