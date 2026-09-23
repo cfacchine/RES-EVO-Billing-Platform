@@ -91,7 +91,8 @@ function doGet(e){
   if(a==='emails')    return json_(getEmails_());
   if(a==='inspect')   return json_(inspect_());
   if(a==='sheetstats') return json_(sheetStats_());
-  if(a==='optimizePreview') return json_(optimizeTracker_(true));          // read-only dry run of #9                          // read-only workbook weight report (#9)
+  if(a==='optimizePreview') return json_(optimizeTracker_(true));          // read-only dry run of #9
+  if(a==='verifyOptimize') return json_(verifyOptimize_());                  // read-only: compare G/Q/S to the pre-optimize backup                          // read-only workbook weight report (#9)
   if(a==='logins')    return json_(getLogins_(e));
   if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);          // #3: schedule+directory+lists+emails in ONE call
   return cachedJson_('sum', getSummary_, e);                                   // #1: cached summary
@@ -956,3 +957,36 @@ function optimizeTracker_(preview){
   if(!preview) bustCache_();
   return out;
 }
+
+/* ---- #9 follow-up (2026-09-23): verify against the backup + repair Due Date (column Q) ---- */
+function optBackupSS_(){
+  var it=DriveApp.searchFiles('title contains "EWS Billing Tracker — backup before optimize" and trashed=false'), best=null;
+  while(it.hasNext()){ var f=it.next(); if(!best||f.getDateCreated()>best.getDateCreated()) best=f; }
+  return best ? {file:best, ss:SpreadsheetApp.openById(best.getId())} : null;
+}
+/* Read-only: compare Days Outstanding / Due Date / Aging Bucket, row by row, with the backup taken before optimizing. */
+function verifyOptimize_(){
+  var b=optBackupSS_(); if(!b) return {error:'backup not found'};
+  var cur=SpreadsheetApp.openById(BOOK_ID).getSheetByName(WRITE_TAB), old=b.ss.getSheetByName(WRITE_TAB);
+  var h=hdrInfo_(cur), first=h.hr+2, last=Math.max(old.getLastRow(),first), n=last-first+1, out={backup:b.file.getName(), rows:n, columns:[]};
+  OPT_COLS.forEach(function(names){
+    var ci=col_(h.m,names); if(ci<0) return;
+    var a=old.getRange(first,ci+1,n,1).getDisplayValues(), c=cur.getRange(first,ci+1,n,1).getDisplayValues(), f=cur.getRange(first,ci+1,Math.min(3,n),1).getFormulas();
+    var bad=[], cnt=0; for(var i=0;i<n;i++){ if(a[i][0]!==c[i][0]){ cnt++; if(bad.length<6) bad.push((first+i)+': was "'+a[i][0]+'" now "'+c[i][0]+'"'); } }
+    out.columns.push({column:names[0], header:cur.getRange(h.hr+1,ci+1).getFormula()||cur.getRange(h.hr+1,ci+1).getValue(), row2Formula:f[0][0], mismatches:cnt, samples:bad});
+  });
+  return out;
+}
+/* Put Due Date back to its original per-row formula on every data row (and clear the empty rows below), then verify. */
+function repairDueDate(){
+  var sh=SpreadsheetApp.openById(BOOK_ID).getSheetByName(WRITE_TAB), h=hdrInfo_(sh), ci=col_(h.m,['due date']);
+  var A=colLetter_(col_(h.m,A_.date)), P=colLetter_(col_(h.m,['payment terms'])), first=h.hr+2, maxR=sh.getMaxRows();
+  var lastData=first-1, keys=keyCol_(sh,h.hr,col_(h.m,A_.date)); for(var i=keys.length-1;i>=0;i--){ if(keys[i]!==''){ lastData=first+i; break; } }
+  var hdr=sh.getRange(h.hr+1,ci+1); if(/ARRAYFORMULA/i.test(hdr.getFormula())) hdr.setValue('Due Date');
+  sh.getRange(first,ci+1,maxR-first+1,1).clearContent();
+  var fs=[]; for(var r=first;r<=Math.max(lastData,first);r++) fs.push(['=IF($'+A+r+'="","",$'+A+r+'+IFERROR(VALUE(REGEXEXTRACT($'+P+r+'&"","\\d+")),60))']);
+  sh.getRange(first,ci+1,fs.length,1).setFormulas(fs);
+  SpreadsheetApp.flush(); bustCache_();
+  var v=verifyOptimize_(); Logger.log(JSON.stringify(v,null,2)); return v;
+}
+var A_ = { date:['invoice date','date','billing date'] };
