@@ -1860,7 +1860,8 @@ function emailBody(v){
   var poReq=s.poReq||nextPoReq(), inv=s.inv||nextInv(b.key==="755"?"51":"50");
   var line=(s.operator||"OPERATOR")+" - "+(s.location||"LOCATION")+" - "+(s.disc||"DISC")+" - "+(b.key==="755"?"Equipment Service (755)":"Operations (765)")+" - Fleet # "+s.fleet;
   if(!isInv) return "Please review the attached PO request.\n\n"+head+"\nBilling Unit : "+bt.label+"\n\nPO Request #: "+poReq+"\n"+line+"\n\nTOTAL: "+total+"\n\nPlease let me know if you have any questions.";
-  return "Please review the attached invoice then SIGN AND RETURN.\n\n"+head+"\nBilling Unit : "+bt.label+"\n\nPO #: "+(s.po||"")+"\nPO Request #: "+poReq+"\nINVOICE #: "+inv+"\n"+line+"\n\nTOTAL: "+total+"\n\nPlease let me know if you have any questions.";
+  var sup=String(s.contact||((fleetRec(s.fleet)||{}).name)||"").trim();   // supervisor on the invoice, else the fleet's directory contact
+  return (sup?sup+",\n\n":"")+"Please review the attached invoice then SIGN, DATE, and REPLY ALL.\n\n"+head+"\nBilling Unit : "+bt.label+"\n\nPO #: "+(s.po||"")+"\nPO Request #: "+poReq+"\nINVOICE #: "+inv+"\n"+line+"\n\nTOTAL: "+total+"\n\nPlease let me know if you have any questions.";
 }
 async function emailDraft(v){
   var s=state[v], rec=fleetRec(s.fleet)||{email:""};
