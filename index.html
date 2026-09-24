@@ -949,7 +949,7 @@ async function htmlToPdf(html, filename){
   var wrap=document.createElement("div"); wrap.style.cssText="position:fixed;left:-9999px;top:0;width:720px;background:#fff";
   wrap.innerHTML=html; document.body.appendChild(wrap);
   var el=wrap.querySelector(".doc")||wrap.firstElementChild; if(el){ el.style.boxShadow="none"; el.style.margin="0"; el.style.maxWidth="none"; }
-  var opt={margin:0,filename:filename,image:{type:"jpeg",quality:.98},html2canvas:{scale:2,backgroundColor:"#fff",useCORS:true,imageTimeout:8000,scrollX:0,scrollY:0},jsPDF:{unit:"in",format:"letter",orientation:"portrait"}};
+  var opt={margin:0,filename:filename,image:{type:"jpeg",quality:.98},pagebreak:{mode:["css","legacy"],avoid:["tr","thead",".doc-billto",".doc-meta .m",".doc-tot",".doc-notes",".doc-noa",".doc-foot",".doc-footbar"]},html2canvas:{scale:2,backgroundColor:"#fff",useCORS:true,imageTimeout:8000,scrollX:0,scrollY:0},jsPDF:{unit:"in",format:"letter",orientation:"portrait"}};
   try{ await _pdfSettle(wrap); var blob=await html2pdf().set(opt).from(el).outputPdf("blob"); var u=URL.createObjectURL(blob); var a=document.createElement("a"); a.href=u; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); toast("Downloaded "+filename); } finally { document.body.removeChild(wrap); }
 }
 function buildARStatement(){
@@ -1814,7 +1814,10 @@ async function _pdfBytesOk(blob){
    Returns {blob, ok, reason}; ok=false => do NOT attach — the render came out incomplete.
    Why this used to fail ~90% of the time: html2canvas offsets its capture by window.scrollY, and
    html2pdf clones the doc into a position:fixed overlay — so with the page scrolled at all, the
-   capture missed the page and came back blank/shifted. scrollX:0/scrollY:0 above pins it. */
+   capture missed the page and came back blank/shifted. scrollX:0/scrollY:0 above pins it.
+   pagebreak.avoid keeps a page break from slicing through a table row, the totals box, the notes
+   block, the assignment notice or the footer - html2pdf shifts any of those that straddles a page
+   boundary down to the next page instead (it leaves alone anything taller than a page). */
 async function _makeDocPdfOnce(v){
   if(typeof html2pdf==="undefined") return {blob:null,ok:false,reason:"PDF engine unavailable"};
   var wrap=document.createElement("div"); wrap.style.cssText="position:fixed;left:-9999px;top:0;width:720px;background:#fff";
@@ -1822,7 +1825,7 @@ async function _makeDocPdfOnce(v){
   var el=wrap.querySelector(".doc"); if(el){ el.style.boxShadow="none"; el.style.margin="0"; el.style.maxWidth="none"; }
   try{
     await _pdfSettle(wrap);   // fonts + images (incl. the 404-ing logo) settle first, so the capture isn't mid-reflow
-    var opt={margin:0,filename:pdfName(v),image:{type:"jpeg",quality:.98},html2canvas:{scale:2,backgroundColor:"#fff",useCORS:true,imageTimeout:8000,scrollX:0,scrollY:0},jsPDF:{unit:"in",format:"letter",orientation:"portrait"}};
+    var opt={margin:0,filename:pdfName(v),image:{type:"jpeg",quality:.98},pagebreak:{mode:["css","legacy"],avoid:["tr","thead",".doc-billto",".doc-meta .m",".doc-tot",".doc-notes",".doc-noa",".doc-foot",".doc-footbar"]},html2canvas:{scale:2,backgroundColor:"#fff",useCORS:true,imageTimeout:8000,scrollX:0,scrollY:0},jsPDF:{unit:"in",format:"letter",orientation:"portrait"}};
     var worker=html2pdf().set(opt).from(el);
     var canvas=null;
     try{ await worker.toCanvas(); canvas=await worker.get("canvas"); }catch(e){ canvas=null; }
