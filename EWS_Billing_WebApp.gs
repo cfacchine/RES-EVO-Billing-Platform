@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.23-4 · built 2026-09-23 18:55 EDT · rename report → "Drive Rename Log" tab, keep name details when the row is blank ==== */
+/* ==== VERSION 2026.09.23-5 · built 2026-09-23 20:20 EDT · rename keeps the unit printed on the PDF (never moves 755↔765) ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.23-4', CODE_BUILT='2026-09-23 18:55 EDT';
+var CODE_VERSION='2026.09.23-5', CODE_BUILT='2026-09-23 20:20 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1331,6 +1331,8 @@ function renameToJobId_(preview){
     if(c.inv) p.inv=c.inv; if(c.po) p.po=c.po;
     if(!p.operator && !p.location && !p.disc){ var tl=oldTail_(name,ps);            // blank tracker row (e.g. a $0 placeholder) → keep what the old name said
       p.operator=tl[0]||''; p.location=tl[1]||''; p.disc=tl[2]||''; if(!p.unit) p.unit=tl[3]||''; }
+    var fu=oldTail_(name,ps)[3], tu=unitCode_(p.unit), unitNote='';                // the unit on the file came from the PDF's Bill To —
+    if(fu && fu!==tu){ unitNote='tracker says '+(tu||'no unit')+', PDF says '+fu+' — kept '+fu; p.unit=fu; }   // trust it over the tracker
     p.date=(c.action==='invoice'||c.action==='signed') ? (p.invDate||p.start) : (p.start||p.invDate);
     if(!p.date) p.date=isoDay_(f.getDateCreated());
     var fname=pdfFileName_(p,c.action); if(fname===name) return;
@@ -1339,7 +1341,7 @@ function renameToJobId_(preview){
     if(planned[key] || dest.getFilesByName(fname).hasNext()){ fname=fname.replace(/\.pdf$/i,' (2).pdf'); key=dest.getId()+'/'+fname; }
     planned[key]=true;
     var mv=dest.getId()!==cur.getId();
-    var why=[src===XP?'Prior Years row':'', p.poReq?'':'no PO Request (pre-POR job)', c.note||'', ps?'re-dated':''].filter(Boolean).join('; ');
+    var why=[src===XP?'Prior Years row':'', p.poReq?'':'no PO Request (pre-POR job)', c.note||'', ps?'re-dated':'', unitNote].filter(Boolean).join('; ');
     done.push(name+'\n     → '+(mv?(uf+' / '+stageFolder_(c.action)+' / '):'')+fname+(why?'   ['+why+']':''));
     report.push([preview?'would rename':'renamed', name, fname, mv?(uf+' / '+stageFolder_(c.action)):'', why]);
     if(!preview){ f.setName(fname); if(mv){ f.moveTo(dest); moved++; } }
@@ -1348,6 +1350,7 @@ function renameToJobId_(preview){
   var out=(preview?'WOULD rename ':'Renamed ')+done.length+' of '+n+' PDF(s) checked'+(moved?(', moved '+moved+' to the right folder'):'')+(done.length?':\n • '+done.join('\n • '):'.');
   if(skip.length) out+='\n\nLeft as-is:\n • '+skip.join('\n • ');
   if(timedOut) out+='\n\n⏱ Stopped near the time limit — run it again to finish the rest.';
+  if(timedOut) report.push(['⏱ stopped','Hit the time limit — run it again to finish the rest','','','']);
   try{ writeRenameLog_(X.ss,report,preview); out='Full list → "Drive Rename Log" tab ('+report.length+' rows).\n'+(preview?'PREVIEW — nothing changed. ':'')+
     done.length+' to rename, '+skip.length+' left as-is'+(timedOut?' (stopped at time limit — run again)':'')+'.\n\n'+out; }catch(e){}
   return out+(preview?'\n\n(preview only — nothing changed)':'');
@@ -1360,6 +1363,7 @@ function writeRenameLog_(ss,rows,preview){
   sh.getRange(1,7).setValue((preview?'PREVIEW':'RUN')+' · '+Utilities.formatDate(new Date(),sheetTz_(),'yyyy-MM-dd HH:mm')+' · code '+CODE_VERSION);
   if(rows.length){ sh.getRange(2,1,rows.length,5).setValues(rows);
     rows.forEach(function(r,i){ if(r[0]==='left as-is') sh.getRange(i+2,1,1,5).setBackground('#FDECEA');
+      else if(/PDF says/.test(r[4])) sh.getRange(i+2,1,1,5).setBackground('#E8F0FE');
       else if(/pre-POR/.test(r[4])) sh.getRange(i+2,1,1,5).setBackground('#FFF4E0'); }); }
   sh.setColumnWidth(2,520); sh.setColumnWidth(3,560); sh.setColumnWidth(4,210); sh.setColumnWidth(5,300);
 }
