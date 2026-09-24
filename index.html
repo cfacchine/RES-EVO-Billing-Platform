@@ -1507,7 +1507,7 @@ var state={
   eq:{ mode:"PO REQUEST", fleet:"6", operator:"CNX", location:"", disc:"", contact:"Brandon Dock", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 60", notes:"", lines:[] },
   ops:{ mode:"PO REQUEST", fleet:"13", operator:"EQT", location:"", disc:"", contact:"Ryan Poorman", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 60", notes:"", lines:[] }
 };
-function iso(d){ return d.toISOString().slice(0,10); }
+function iso(d){ return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }   // LOCAL calendar day - toISOString() alone is UTC, so anything entered after 8pm ET was stamped tomorrow
 var ISSUED_POREQ={};   // PO Request numbers generated/saved this session — dedupe guard (until loadData refreshes DATA)
 function poReqNum(s){ var g=(""+s).match(/(\d+)\s*$/); return g?+g[1]:0; }
 function markIssuedPoReq(n){ if(n) ISSUED_POREQ[String(n).trim().toLowerCase()]=1; }

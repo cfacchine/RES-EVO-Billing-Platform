@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.23-5 · built 2026-09-23 20:20 EDT · rename keeps the unit printed on the PDF (never moves 755↔765) ==== */
+/* ==== VERSION 2026.09.24-1 · built 2026-09-24 17:05 EDT · Invoice Date written as a clean ISO day (fixes 0.1666 Days Outstanding) ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.23-5', CODE_BUILT='2026-09-23 20:20 EDT';
+var CODE_VERSION='2026.09.24-1', CODE_BUILT='2026-09-24 17:05 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -537,10 +537,46 @@ function appendDoc_(p,action){
     .flush();                                                            // one write for the whole row
   return {row:target, tab:sh.getName()};
 }
-function safeDate_(v){                                              // "2026-09-23" → that calendar day in the sheet's zone
-  var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if(m){ try{ var p=Utilities.parseDate(m[0],sheetTz_(),'yyyy-MM-dd'); if(!isNaN(p.getTime())) return p; }catch(e){} }
-  var d = v ? new Date(v) : new Date(); if(isNaN(d.getTime()) || d.getFullYear()<2020 || d.getFullYear()>2100) d=new Date(); return d; }
+function safeDate_(v){                                              // "2026-09-23" → that calendar day, midnight, no time component
+  /* Returns the ISO day as a STRING on purpose. Handing Sheets a Date object hands it an instant,
+     which the sheet then renders in ITS timezone - if that differs from the zone the Date was built
+     in (script tz fallback, another script writing the row), the cell lands at e.g. 04:00 instead of
+     midnight. Days Outstanding is TODAY()-A, so a 4-hour remainder showed up as 0.1666 days.
+     An ISO string is parsed by the spreadsheet itself, in its own zone -> always exact midnight. */
+  var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[0];
+  var d = v ? new Date(v) : new Date(); if(isNaN(d.getTime()) || d.getFullYear()<2020 || d.getFullYear()>2100) d=new Date();
+  return Utilities.formatDate(d, sheetTz_(), 'yyyy-MM-dd'); }
+
+/* ONE-TIME REPAIR - Run ▸ normalizeInvoiceDatesPreview first (reports only), then normalizeInvoiceDates.
+   Strips any time-of-day from Invoice Date on both tracker tabs, so TODAY()-A is a whole number of days
+   again. Rewrites each affected cell as an ISO day string, which the sheet re-parses at midnight. */
+function normalizeInvoiceDatesPreview(){ return normalizeDates_(true); }
+function normalizeInvoiceDates(){ return normalizeDates_(false); }
+function normalizeDates_(preview){
+  var ss=SpreadsheetApp.openById(BOOK_ID), tz=sheetTz_(), out={preview:!!preview, tabs:[]};
+  TRK_TABS.forEach(function(name){
+    var sh=ss.getSheetByName(name); if(!sh) { out.tabs.push({tab:name, error:'missing'}); return; }
+    var lastR=sh.getLastRow(), lastC=sh.getLastColumn(); if(lastR<2) return;
+    var head=sh.getRange(1,1,Math.min(lastR,15),lastC).getValues();
+    var hr=trackerHeaderRow_(head); if(hr<0){ out.tabs.push({tab:name, error:'no header row'}); return; }
+    var ci=col_(hdr_(head[hr]), A.date); if(ci<0){ out.tabs.push({tab:name, error:'no Invoice Date column'}); return; }
+    var first=hr+2, n=lastR-first+1; if(n<1) return;
+    var rng=sh.getRange(first,ci+1,n,1), vals=rng.getValues(), fixed=0, samples=[];
+    for(var i=0;i<n;i++){
+      var d=vals[i][0]; if(!(d instanceof Date) || isNaN(d.getTime())) continue;
+      var iso=Utilities.formatDate(d,tz,'yyyy-MM-dd');
+      if(Utilities.formatDate(d,tz,'HH:mm:ss')==='00:00:00') continue;          // already clean
+      if(samples.length<8) samples.push('row '+(first+i)+': '+Utilities.formatDate(d,tz,'yyyy-MM-dd HH:mm:ss')+' → '+iso);
+      if(!preview) vals[i][0]=iso;                                              // string → sheet re-parses at midnight
+      fixed++;
+    }
+    if(!preview && fixed) rng.setValues(vals);
+    out.tabs.push({tab:name, rowsScanned:n, needFix:fixed, samples:samples});
+  });
+  Logger.log(JSON.stringify(out,null,2));
+  return out;
+}
 
 /*************************************************************************************************
  * TIDY THE BILLING TRACKER — trims the thousands of empty formula-template rows.
