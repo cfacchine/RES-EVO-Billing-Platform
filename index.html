@@ -819,6 +819,7 @@ function applyConfig(b){
        if(ops.length) OPERATORS=ops;
        if(dsc.length) DISC=dsc; }catch(e){}
   try{ if(b&&b.porHigh) POR_HIGH=Math.max(POR_HIGH,Number(b.porHigh)||0); }catch(e){}
+  try{ BACKEND_VER=String((b&&b.version)||""); if(BACKEND_VER>="2026.09.25-3") loadOrphans(); }catch(e){}
   try{ if(b&&b.pipeOrder&&typeof b.pipeOrder==="object"){ PIPE_ORDER=b.pipeOrder; try{ localStorage.setItem("revo-pipeorder",JSON.stringify(PIPE_ORDER)); }catch(e){} } }catch(e){}
   try{ if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
 }
@@ -1210,6 +1211,8 @@ function computeLeaks(){
   var pg={}; rows.forEach(function(x){ if(!x.poReq||x.inv||isPaid(x)) return; var k=poDupKey(x); (pg[k]=pg[k]||[]).push(x); });   // open PO Requests with identical details
   var a6=[]; Object.keys(pg).forEach(function(k){ if(pg[k].length>1) pg[k].forEach(function(x){ if(!leakDismissed('pordup',x)) a6.push(x); }); });
   if(a6.length) out.push({key:"pordup",sev:"crit",label:"Possible duplicate PO Requests",desc:"Open PO Requests with the same unit, operator, pad, category and amount — usually the same job generated twice. Delete the extra row (and its PDF).",items:a6,amount:0,note:a6.length+" row(s)",jump:true});
+  var ao=ORPHANS.filter(function(f){ return !LEAK_DISMISSED.has("orphanpdf::inv"+f.id); }).map(function(f){ return {__orphan:true,inv:f.id,name:f.name,url:f.url,created:f.created}; });
+  if(ao.length) out.push({key:"orphanpdf",sev:"warn",label:"PO Request PDF with no row on the sheet",desc:"A PO Request PDF is filed in Drive but its number isn't on the Billing Tracker \u2014 usually a leftover from a request that was re-generated under a new number or deleted. Check it wasn't sent, then move it out of the filing folders.",items:(ao.length>1?[{__orphanAll:true}]:[]).concat(ao),count:ao.length,amount:0,note:ao.length+" file(s)"});
   var invPaid=function(n){ var rs=rows.filter(function(r){return String(r.inv||"").trim()===String(n);}); return rs.length>0 && rs.every(function(r){return isPaid(r);}); };
   var gaps=[]; ["50","51"].forEach(function(pfx){
     var nums=[...new Set(rows.map(function(x){return String(x.inv||"").trim();}).filter(function(n){return n.length===5&&n.slice(0,2)===pfx&&/^\d+$/.test(n);}).map(Number))].sort(function(a,b){return a-b;});
@@ -1244,6 +1247,8 @@ function renderLeakGuard(){
       if(x.__more) return '<div class="leak-li"><span class="sub">'+esc(x.inv)+'</span></div>';
       var dk = L.key+'::'+(x.id!=null?('id'+x.id):('inv'+(x.inv||'')));
       var trash='<button class="leak-x" title="Dismiss — checked, not a concern" onclick="dismissLeak(\''+dk+'\')"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button>';
+      if(x.__orphanAll) return '<div class="leak-li"><span></span><span class="li-right"><a href="#" onclick="quarantineOrphan(\'*\');return false;">move all to _Trash - Review \u25b8</a></span></div>';
+      if(x.__orphan) return '<div class="leak-li"><span>'+esc(x.name)+(x.created?' \u00b7 filed '+esc(x.created):'')+'</span><span class="li-right"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">view \u25b8</a> <a href="#" onclick="quarantineOrphan(\''+x.inv+'\');return false;">move \u25b8</a>'+trash+'</span></div>';
       if(x.__gap) return '<div class="leak-li"><span>Invoice #'+esc(x.inv)+' — not present in the tracker</span><span class="li-right">'+trash+'</span></div>';
       var jump=(L.jump&&x.id!=null)?'<a href="#" onclick="switchView(\'dashboard\');openRecord('+x.id+');return false;">open ▸</a>':'';
       return '<div class="leak-li'+dcls(x)+'"><span>'+starBtn(x)+esc(x.inv||x.poReq||"—")+' · '+esc(x.operator)+' – '+esc(x.location)+(x.amount?' · '+money(x.amount):'')+(x.age!=null?' · '+x.age+'d':'')+'</span><span class="li-right">'+jump+trash+'</span></div>';
@@ -1512,7 +1517,8 @@ var state={
   ops:{ mode:"PO REQUEST", fleet:"13", operator:"EQT", location:"", disc:"", contact:"Ryan Poorman", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 60", notes:"", lines:[] }
 };
 function iso(d){ return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }   // LOCAL calendar day - toISOString() alone is UTC, so anything entered after 8pm ET was stamped tomorrow
-var POR_HIGH=0;         // highest PO Request # ever issued (server high-water mark) — never reuse a number whose row was deleted
+var POR_HIGH=0, BACKEND_VER="", ORPHANS=[];   // ORPHANS: PO Request PDFs in Drive with no row on the sheet (backend 2026.09.25-3+)
+        // highest PO Request # ever issued (server high-water mark) — never reuse a number whose row was deleted
 var ISSUED_POREQ={};   // PO Request numbers generated/saved this session — dedupe guard (until loadData refreshes DATA)
 function poReqNum(s){ var g=(""+s).match(/(\d+)\s*$/); return g?+g[1]:0; }
 function markIssuedPoReq(n){ if(n) ISSUED_POREQ[String(n).trim().toLowerCase()]=1; }
@@ -1529,6 +1535,19 @@ function findPoDup(v){   // an OPEN (not invoiced, not paid) PO Request with the
   var b=B[v], s=state[v], me=String(s.poReq||"").trim().toLowerCase();
   var k=poDupKey({unit:b.key,operator:s.operator,location:s.location,disc:s.disc,amount:docLines(v).reduce(function(a,l){return a+l.total;},0)});
   return DATA.rows.find(function(x){ return x.poReq && !x.inv && !isPaid(x) && String(x.poReq).trim().toLowerCase()!==me && poDupKey(x)===k; });
+}
+function loadOrphans(fresh){ if(!CONFIG.EXEC_URL) return;
+  fetch(CONFIG.EXEC_URL+"?action=orphanpdfs"+(fresh?"&fresh=1":"")+"&t="+Date.now()).then(function(r){return r.json();})
+    .then(function(j){ if(j&&Array.isArray(j.files)){ ORPHANS=j.files; try{ renderLeakGuard(); }catch(e){} } }).catch(function(){}); }
+function quarantineOrphan(id){
+  var list=ORPHANS.filter(function(o){ return id==="*" ? !LEAK_DISMISSED.has("orphanpdf::inv"+o.id) : o.id===id; }); if(!list.length) return;
+  choicePopup(list.length>1?"Move "+list.length+" PDFs out of the filing folders?":"Move this PDF out of the filing folders?",
+    list.map(function(o){return o.name;}).join("\n")+"\n\n"+(list.length>1?"None of these have":"It has no")+" row on the Billing Tracker. They go to \u201c_Trash - Review\u201d in the EWS Billing folder \u2014 nothing is deleted.",
+    [{label:"Move",primary:true,fn:function(){ toast("Moving…");
+      postToSheet({action:"quarantine",payload:{ids:list.map(function(o){return o.id;})}}).then(function(r){
+        var mv=(r&&r.moved)||[]; ORPHANS=ORPHANS.filter(function(o){ return mv.indexOf(o.name)<0; }); renderLeakGuard();
+        if(mv.length) toast("Moved "+mv.length+" to _Trash - Review"); else toast("Nothing moved \u2014 "+((r&&r.error)||"already linked or gone"),"warn"); })
+      .catch(function(){ toast("No reply from the sheet \u2014 refresh and check Leak Guard","warn"); }); }}]);
 }
 function dupLine(x){ return x.poReq+"  ·  "+[x.operator,x.location,x.disc].filter(Boolean).join(" – ")+"  ·  "+money(x.amount)+(x.date?"  ·  "+x.date:""); }
 /* Choice popup: title, message, buttons [{label, primary, fn}] — Cancel is always added. */
