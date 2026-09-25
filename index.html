@@ -818,7 +818,7 @@ function applyConfig(b){
        var ops=cl(ls&&ls.operators), dsc=cl(ls&&ls.disc);
        if(ops.length) OPERATORS=ops;
        if(dsc.length) DISC=dsc; }catch(e){}
-  try{ if(b&&b.porHigh) POR_HIGH=Math.max(POR_HIGH,Number(b.porHigh)||0); }catch(e){}
+  try{ if(b&&b.porHigh) setPorHigh(b.porHigh); }catch(e){}
   try{ BACKEND_VER=String((b&&b.version)||""); if(BACKEND_VER>="2026.09.25-3") loadOrphans(); }catch(e){}
   try{ if(b&&b.pipeOrder&&typeof b.pipeOrder==="object"){ PIPE_ORDER=b.pipeOrder; try{ localStorage.setItem("revo-pipeorder",JSON.stringify(PIPE_ORDER)); }catch(e){} } }catch(e){}
   try{ if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
@@ -1523,10 +1523,10 @@ function poReqNum(s){ var g=(""+s).match(/(\d+)\s*$/); return g?+g[1]:0; }
 function markIssuedPoReq(n){ if(n) ISSUED_POREQ[String(n).trim().toLowerCase()]=1; }
 function poReqExists(q){ q=String(q||"").trim().toLowerCase(); if(!q) return false; if(ISSUED_POREQ[q]) return true; return DATA.rows.some(function(r){return String(r.poReq||"").trim().toLowerCase()===q;}); }
 function nextPoReq(){ var m=0;
-  DATA.rows.forEach(function(r){ var n=poReqNum(r.poReq); if(n>m)m=n; });
+  DATA.rows.forEach(function(r){ if(!isPlainPor(r.poReq)) return; var n=poReqNum(r.poReq); if(n>m)m=n; });
   Object.keys(ISSUED_POREQ).forEach(function(k){ var n=poReqNum(k); if(n>m)m=n; });
-  if(POR_HIGH>m) m=POR_HIGH;
-  ORPHANS.forEach(function(o){ var n=poReqNum(o.poReq); if(n>m)m=n; });   // never reuse a number an orphan PDF already carries
+  if(POR_HIGH>m && POR_HIGH<=m+100) m=POR_HIGH;
+  ORPHANS.forEach(function(o){ if(!isPlainPor(o.name)) return; var n=poReqNum(o.poReq); if(n>m && n<=m+100) m=n; });   // never reuse a number an orphan PDF already carries
   return "EWS-POR-"+String(m+1).padStart(6,"0"); }
 /* ---- Duplicate PO Request guard (2026-09-25) — a stale builder re-Generated 000028/29 as 000036/37 on 9/24 ---- */
 function poReqOnSheet(q){ q=String(q||"").trim().toLowerCase(); return !!q && DATA.rows.find(function(r){return String(r.poReq||"").trim().toLowerCase()===q;}); }
@@ -1538,8 +1538,13 @@ function findPoDup(v){   // an OPEN (not invoiced, not paid) PO Request with the
 }
 function loadOrphans(fresh){ if(!CONFIG.EXEC_URL) return;
   fetch(CONFIG.EXEC_URL+"?action=orphanpdfs"+(fresh?"&fresh=1":"")+"&t="+Date.now()).then(function(r){return r.json();})
-    .then(function(j){ if(j&&j.porHigh) POR_HIGH=Math.max(POR_HIGH,Number(j.porHigh)||0);
-      if(j&&Array.isArray(j.files)){ ORPHANS=j.files; try{ renderLeakGuard(); }catch(e){} } }).catch(function(){}); }
+    .then(function(j){ if(j&&j.porHigh) setPorHigh(j.porHigh);
+      if(j&&Array.isArray(j.files)){ ORPHANS=j.files.filter(function(o){ return isPlainPor(o.name); }); try{ renderLeakGuard(); }catch(e){} } }).catch(function(){}); }
+/* Only the plain EWS-POR-###### series counts. The OP-/ES- blanket requests (EWS-POR-OP-00014, EWS-POR-ES-9001) are
+   legitimate older history, not orphans, and their numbers must never drive the next PO Request #. */
+function isPlainPor(s){ return /^\s*EWS-POR-\d+\b/i.test(String(s||"")); }
+function sheetPorMax(){ var m=0; DATA.rows.forEach(function(r){ if(isPlainPor(r.poReq)){ var n=poReqNum(r.poReq); if(n>m)m=n; } }); return m; }
+function setPorHigh(v){ var n=Number(v)||0, cap=sheetPorMax()+100; if(n>0 && (!DATA.rows.length || n<=cap)) POR_HIGH=Math.max(POR_HIGH,n); }   // ignore an implausible high-water mark
 function quarantineOrphan(id){
   var list=ORPHANS.filter(function(o){ return id==="*" ? !LEAK_DISMISSED.has("orphanpdf::inv"+o.id) : o.id===id; }); if(!list.length) return;
   choicePopup(list.length>1?"Move "+list.length+" PDFs out of the filing folders?":"Move this PDF out of the filing folders?",
