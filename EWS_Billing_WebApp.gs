@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.25-6 · built 2026-09-25 06:14 EDT · Save re-files the PDF (replaces the old copy) so edits reach Drive ==== */
+/* ==== VERSION 2026.09.25-7 · built 2026-09-25 12:42 EDT · Inbox/renamer name files from the newest row sharing a PO Request # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.25-6', CODE_BUILT='2026-09-25 06:14 EDT';
+var CODE_VERSION='2026.09.25-7', CODE_BUILT='2026-09-25 12:42 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1313,6 +1313,16 @@ function trackerIndex_(tab){
 }
 function normId_(s){ return String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]/g,''); }
 function porNorm_(s){ var m=String(s==null?'':s).match(/EWSO?\s*-?\s*POR\s*-?\s*(?:([A-Z]{2})\s*-?\s*)?(\d+)/i); return m?('EWSPOR'+(m[1]?m[1].toUpperCase():'')+Number(m[2])):''; }  // EWS-POR-00022 ≡ EWS-POR-000022 ≡ EWSO-POR-22; OP/ES series kept apart (EWS-POR-OP-00016)
+/* Several rows share a PO Request # (reused # or a job split across invoices) → name the file from the NEWEST one:
+   latest Invoice Date, then the lowest row on the sheet (rows are appended). Stops an old row's operator/location
+   (e.g. a Jan CNX Leto invoice) being stamped onto a new PO Request. */
+function pickRow_(X,rows){
+  if(!rows||rows.length<2) return rows&&rows[0];
+  var best=rows[0], bk='';
+  rows.forEach(function(r){ var k=(dispToIso_(cellVal_(X.disp[r],X.m,A.date))||'0000-00-00')+'|'+('000000'+r).slice(-6);
+    if(k>bk){ bk=k; best=r; } });
+  return best;
+}
 /* Row → the fields the file name is built from. */
 function rowFields_(X,r,extra){
   var v=X.vals[r], d=X.disp[r], o={ operator:cellVal_(v,X.m,A.operator), location:cellVal_(v,X.m,A.location), disc:cellVal_(v,X.m,A.disc),
@@ -1366,7 +1376,7 @@ function processDriveInbox_(preview){
     if(!res.rows.length){ stuck.push(name+'  ('+res.why+')');
       if(!preview){ try{ f.setDescription('Not filed: '+res.why+'. Rename it with the PO Request # or invoice #, or file it by hand.'); }catch(e){} }
       continue; }
-    var p=rowFields_(X,res.rows[0],{date:isoDay_(f.getDateCreated())});
+    var p=rowFields_(X,pickRow_(X,res.rows),{date:isoDay_(f.getDateCreated())});
     if(res.action==='signed') p.inv=res.inv||p.inv;
     if(res.action==='custpo' && res.po) p.po=res.po;
     var fname=pdfFileName_(p,res.action), uf=unitFolder_(p.unit);
@@ -1437,7 +1447,7 @@ function renameToJobId_(preview){
     else { c=legacyClassify_(X,name); if((!c||!c.rows.length) && XP){ var cp=legacyClassify_(XP,name); if(cp&&cp.rows.length){ c=cp; src=XP; } } }
     n++;
     if(!c || !c.rows.length){ skip.push(name+'  (no tracker match)'); report.push(['left as-is',name,'','','no tracker match']); return; }
-    var p=rowFields_(src,c.rows[0],{});
+    var p=rowFields_(src,pickRow_(src,c.rows),{});
     if(c.inv) p.inv=c.inv; if(c.po) p.po=c.po;
     if(!p.operator && !p.location && !p.disc){ var tl=oldTail_(name,ps);            // blank tracker row (e.g. a $0 placeholder) → keep what the old name said
       p.operator=tl[0]||''; p.location=tl[1]||''; p.disc=tl[2]||''; if(!p.unit) p.unit=tl[3]||''; }
