@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.25-2 · built 2026-09-25 03:59 EDT · Duplicate PO Request guard + PO Request # high-water mark ==== */
+/* ==== VERSION 2026.09.25-3 · built 2026-09-25 04:33 EDT · Duplicate PO Request guard + high-water mark + orphan PO Request PDF check ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.25-2', CODE_BUILT='2026-09-25 03:59 EDT';
+var CODE_VERSION='2026.09.25-3', CODE_BUILT='2026-09-25 04:33 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -105,6 +105,7 @@ function doGet(e){
   if(a==='verifyOptimize') return json_(verifyOptimize_());                  // read-only: compare G/Q/S to the pre-optimize backup                          // read-only workbook weight report (#9)
   if(a==='logins')    return json_(getLogins_(e));
   if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);
+  if(a==='orphanpdfs') return cachedJson_('orph', orphanPdfs_, e);      // PO Request PDFs in Drive whose number isn't on the sheet (Leak Guard)
   if(a==='pending')   return cachedJson_('pend', getPending_, e);          // #10: small feed for the Fleet Tracker's Pending Invoices tab          // #3: schedule+directory+lists+emails in ONE call
   return cachedJson_('sum', getSummary_, e);                                   // #1: cached summary
 }
@@ -181,6 +182,7 @@ function doPost(e){
            TM.write=Date.now()-t1; bustCache_(); var rowN=(loc&&loc.row)?loc.row:loc, tab=(loc&&loc.tab)?loc.tab:WRITE_TAB;
            var t2=Date.now(), rec=rowRecord_(tab,rowN); TM.readBack=Date.now()-t2; TM.total=Date.now()-T0;
            return json_({ok:true,row:rowN,rec:rec,_ms:TM}); }                     // #8: send back the saved row
+         if(body.action==='quarantine'){ var qr=quarantinePdfs_(body.payload||{}); bustCache_(); return json_({ok:true,moved:qr.moved}); }
          if(body.action==='pipeorder'){ var okp=setPipeOrder_(body.payload||{}); if(okp) bustCache_(); return json_({ok:okp}); }
          if(body.action==='update'){ var ok=updateRow_(body.payload||{}); if(ok) bustCache_(); TM.total=Date.now()-T0; return json_({ok:ok,_ms:TM}); }
          if(body.action==='delete'){ var dr=deleteDoc_(body.payload||{}); if(dr) bustCache_(); return json_({ok:!!dr,row:(dr||0),tab:WRITE_TAB}); }
@@ -747,6 +749,33 @@ function poGuard_(p,contentOnly){
     info.kind='content'; info.msg='Possible duplicate of '+por+' (row '+info.row+') — same unit, operator, pad, category and amount, still open.'; return info;
   }
   return null;
+}
+/* Orphan PO Request PDFs: a PO Request PDF filed in Drive whose EWS-POR number is on neither tracker tab —
+   left behind when a request was re-generated under a new number or its row was deleted (9/23: POR 30/31
+   = Porter North copies of 34; 33/36 = Pole Cat copies of 32/35). Read-only; cached until the next write. */
+function orphanPdfs_(){
+  var ss=SpreadsheetApp.openById(BOOK_ID), have={}, n=0;
+  TRK_TABS.forEach(function(name){ var sh=ss.getSheetByName(name); if(!sh) return; var h=hdrInfo_(sh); if(!h) return;
+    keyCol_(sh,h.hr,col_(h.m,A.poReq)).forEach(function(v){ var k=porNorm_(v); if(k){ have[k]=1; n++; } }); });
+  if(!n) return {files:[], error:'no PO Request numbers read from the sheet'};          // never flag everything on a bad read
+  var out=[];
+  eachPdf_(DriveApp.getFolderById(DRIVE_ROOT),function(file){
+    var name=file.getName(), ps=parseScheme_(name), por='';
+    if(ps){ if(ps.step===1) por=ps.job; }                                      // "<Job ID> - 1 PO Request - …"
+    else if(/^\s*EWSO?\s*-?\s*POR/i.test(name)) por=name;                        // older "EWS-POR-000030 - EQT - … .pdf" names
+    var k=porNorm_(por); if(!k || have[k]) return;
+    out.push({id:file.getId(), name:name, url:file.getUrl(), poReq:porDisplay_(por),
+              created:Utilities.formatDate(file.getDateCreated(), ss.getSpreadsheetTimeZone()||'America/New_York', 'M/d/yyyy')});
+  });
+  return {files:out};
+}
+/* Move orphan PDFs (by id) to "_Trash - Review" in the EWS Billing folder. Only files that are STILL orphans move; nothing is deleted. */
+function quarantinePdfs_(p){
+  var ids=(p&&p.ids)||[], cur={}, moved=[]; if(!ids.length) return {moved:moved};
+  orphanPdfs_().files.forEach(function(f){ cur[f.id]=f; });
+  var root=DriveApp.getFolderById(DRIVE_ROOT), it=root.getFoldersByName('_Trash - Review'), tf=it.hasNext()?it.next():root.createFolder('_Trash - Review');
+  ids.forEach(function(id){ if(!cur[id]) return; try{ DriveApp.getFileById(id).moveTo(tf); moved.push(cur[id].name); }catch(e){} });
+  return {moved:moved};
 }
 /* PO Request # high-water mark: the highest number ever issued, kept even if its row is later deleted, so a
    number is never handed out twice (000036 was used on 9/23, its row vanished, and 36 was issued again 9/24). */
