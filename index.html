@@ -1205,6 +1205,8 @@ function computeLeaks(){
   if(a3.length) out.push({key:"signedopen",sev:"info",label:"Signed — ready to close as Paid",desc:"The customer signed but the row isn't marked Paid. Close these out so you stop chasing them.",items:a3,amount:a3.reduce(function(a,x){return a+x.amount;},0),jump:true});
   var anyPdf=rows.some(function(x){return x.pdfUrl;});
   if(anyPdf){ var a4=rows.filter(function(x){return x.inv&&!x.pdfUrl&&!isPaid(x)&&!leakDismissed('nopdf',x);}); if(a4.length) out.push({key:"nopdf",sev:"warn",label:"Open invoice with no PDF filed",desc:"An open invoice with no saved PDF link — you'll want it filed in Drive to send or chase. Paid/legacy invoices from before PDFs were filed are ignored.",items:a4,amount:a4.reduce(function(a,x){return a+x.amount;},0),jump:true}); }
+  var a4p=rows.filter(function(x){return x.poReq&&!x.inv&&!isPaid(x)&&!x.pdfUrl&&!leakDismissed('noporpdf',x);});   // 9/25: 28/29/32/35 had no PDF and nothing said so
+  if(a4p.length) out.push({key:"noporpdf",sev:"warn",label:"PO Request with no PDF filed",desc:"An open PO Request with no PDF linked. Open it and Download PDF (or save the emailed copy), then drop the file in EWS Billing \u203a 0 \u00b7 Inbox \u2014 it files and links itself.",items:a4p,amount:0,note:a4p.length+" request(s)",jump:true});
   var seen={},dups={}; rows.forEach(function(x){ var n=String(x.inv||"").trim(); if(!n)return; if(seen[n])dups[n]=(dups[n]||1)+1; else seen[n]=1; });
   var dupNums=Object.keys(dups);
   if(dupNums.length){ var a5=rows.filter(function(x){return dups[String(x.inv||"").trim()]&&!leakDismissed('dup',x);}); if(a5.length) out.push({key:"dup",sev:"crit",label:"Duplicate invoice numbers",desc:"The same invoice # is on more than one row — a double-count or a numbering error. Reconcile them.",items:a5,amount:0,note:a5.length+" row(s)",jump:true}); }
@@ -1776,7 +1778,8 @@ async function generate(v,opts){
          {label:"Create anyway",fn:function(){ generate(v,{newNum:true,force:true,keep:keep}); }}]);
       return; }
     if(res&&res.error){ toast("Saved on this device, but the sheet reported: "+res.error,"warn"); }
-    else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"+(recd.pdfB64?" + PDF filed in Drive":"")); afterWrite(res); }
+    else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"+(recd.pdfB64?" + PDF filed in Drive":"")); afterWrite(res);
+      if(!recd.pdfB64) ackPopup("Saved \u2014 but no PDF was filed", (isInv?"Invoice ":"PO Request ")+num+" is on the sheet, but the PDF didn't render, so nothing was filed in Drive.  Click Download PDF, then drop the file into EWS Billing \u203a 0 \u00b7 Inbox and it will file and link itself."); }
   }).catch(function(err){
     toast("No clean reply from the sheet — checking whether "+num+" saved…");
     verifyOnSheet(isInv?num:"", isInv?"":num).then(function(ok){
