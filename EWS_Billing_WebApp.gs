@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.25-1 · built 2026-09-25 03:16 EDT · Signed column written as "Yes" (was "X") ==== */
+/* ==== VERSION 2026.09.25-2 · built 2026-09-25 03:59 EDT · Duplicate PO Request guard + PO Request # high-water mark ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.25-1', CODE_BUILT='2026-09-25 03:16 EDT';
+var CODE_VERSION='2026.09.25-2', CODE_BUILT='2026-09-25 03:59 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -150,7 +150,7 @@ function getPending_(){
 }
 function getBootstrap_(){
   function safe(f){ try{ return f(); }catch(err){ return null; } }
-  return { version:CODE_VERSION, built:CODE_BUILT, schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_), pipeOrder:safe(getPipeOrder_) };
+  return { version:CODE_VERSION, built:CODE_BUILT, schedule:safe(getSchedule_), directory:safe(getDirectory_), lists:safe(getLists_), emails:safe(getEmails_), pipeOrder:safe(getPipeOrder_), porHigh:safe(getPorHigh_) };
 }
 /* Pipeline drag-and-drop order, shared by everyone. One Script Property per stage ("PIPE_ORDER_<stage>")
    holding a JSON list of card keys ("i:<invoice#>" or "r:<PO request#>"). Cards not in a list keep the default order. */
@@ -173,7 +173,11 @@ function doPost(e){
   try{ var body=JSON.parse(e.postData.contents); var lock=LockService.getScriptLock(); lock.tryLock(20000); TM.lock=Date.now()-T0;
     try{ if(body.action==='logLogin') return json_({ok:true,row:logLogin_(body.payload||{})});
          if(body.action==='po'||body.action==='invoice'||body.action==='save'){
-           var t1=Date.now(), loc=(body.action==='save')?saveDoc_(body.payload||{}):appendDoc_(body.payload||{},body.action);
+           var pl=body.payload||{};
+           if(body.action==='po' && !pl.force){ var g=poGuard_(pl,false); if(g) return json_({ok:false,dup:g,error:g.msg}); }   // duplicate PO Request guard (before any PDF is filed)
+           var t1=Date.now(), loc=(body.action==='save')?saveDoc_(pl):appendDoc_(pl,body.action);
+           if(loc&&loc.dup) return json_({ok:false,dup:loc.dup,error:loc.dup.msg});
+           if(body.action==='po'||(body.action==='save'&&!pl.inv)) bumpPorHigh_(pl.poReq);
            TM.write=Date.now()-t1; bustCache_(); var rowN=(loc&&loc.row)?loc.row:loc, tab=(loc&&loc.tab)?loc.tab:WRITE_TAB;
            var t2=Date.now(), rec=rowRecord_(tab,rowN); TM.readBack=Date.now()-t2; TM.total=Date.now()-T0;
            return json_({ok:true,row:rowN,rec:rec,_ms:TM}); }                     // #8: send back the saved row
@@ -718,6 +722,37 @@ RowPatch_.prototype.flush=function(){
   runs.forEach(function(r){ self.sh.getRange(self.row,r[0]+1,1,r.length).setValues([r.map(function(c){return self.p[c];})]); });
 };
 function setCell_(sh,row,m,names,val){ var i=col_(m,names); if(i>=0 && val!==''&&val!=null) sh.getRange(row,i+1).setValue(val); }
+/* ---- Duplicate PO Request guard (2026.09.25-2) ----------------------------------------------------------
+   Stops a second row for the same job: 2026-09-24 a stale builder re-Generated EWS-POR-000028/29 as 000036/37.
+   Refuses a NEW PO Request row when (a) its PO Request # is already on the Billing Tracker, or (b) an open row
+   (no Invoice #, not Paid) already has the same Billing Unit + Operator + Pad + Category + Amount.
+   The page shows the match and can resend with force:true ("Create anyway"). Returns null when clear. */
+function poGuard_(p,contentOnly){
+  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB); if(!sh) return null;
+  var h=hdrInfo_(sh); if(!h) return null; var m=h.m, n=sh.getLastRow()-(h.hr+1); if(n<1) return null;
+  var vals=sh.getRange(h.hr+2,1,n,sh.getLastColumn()).getValues();
+  var c={inv:col_(m,A.inv),por:col_(m,A.poReq),amt:col_(m,A.amount),unit:col_(m,A.unit),op:col_(m,A.operator),
+         loc:col_(m,A.location),disc:col_(m,A.disc),st:col_(m,A.status),paid:col_(m,A.paid),date:col_(m,A.date)};
+  var t=function(r,i){ return i>=0?String(r[i]==null?'':r[i]).trim():''; }, lc=function(v){ return String(v||'').trim().toLowerCase(); };
+  var want=lc(p.poReq), unit=String(p.unit||''), amount=p.total!=null?Number(p.total):(p.lines||[]).reduce(function(a,l){return a+(Number(l.total)||0);},0);
+  for(var r=0;r<vals.length;r++){ var v=vals[r], por=t(v,c.por); if(!por) continue;
+    var info={poReq:por, row:h.hr+2+r, operator:t(v,c.op), location:t(v,c.loc), disc:t(v,c.disc), amount:Number(v[c.amt])||0,
+              date:(v[c.date] instanceof Date)?Utilities.formatDate(v[c.date],ss.getSpreadsheetTimeZone()||'America/New_York','M/d/yyyy'):t(v,c.date)};
+    if(!contentOnly && want && lc(por)===want){ info.kind='number'; info.msg=por+' is already on the Billing Tracker (row '+info.row+').'; return info; }
+    if(t(v,c.inv) || /paid/i.test(t(v,c.st)) || /^y/i.test(t(v,c.paid))) continue;          // only open, not-yet-invoiced requests
+    if(want && lc(por)===want) continue;
+    if(unit && t(v,c.unit).indexOf(unit)<0) continue;
+    if(lc(t(v,c.op))!==lc(p.operator) || lc(t(v,c.loc))!==lc(p.location) || lc(t(v,c.disc))!==lc(p.disc)) continue;
+    if(Math.abs((Number(v[c.amt])||0)-amount)>0.005) continue;
+    info.kind='content'; info.msg='Possible duplicate of '+por+' (row '+info.row+') — same unit, operator, pad, category and amount, still open.'; return info;
+  }
+  return null;
+}
+/* PO Request # high-water mark: the highest number ever issued, kept even if its row is later deleted, so a
+   number is never handed out twice (000036 was used on 9/23, its row vanished, and 36 was issued again 9/24). */
+function getPorHigh_(){ return Number(PropertiesService.getScriptProperties().getProperty('POR_HIGH')||0); }
+function bumpPorHigh_(poReq){ var g=String(poReq||'').match(/(\d+)\s*$/); if(!g) return; var n=+g[1];
+  try{ var pr=PropertiesService.getScriptProperties(); if(n>Number(pr.getProperty('POR_HIGH')||0)) pr.setProperty('POR_HIGH',String(n)); }catch(e){} }
 /* Upsert a document by PO Request # (or Invoice #) — update the row in place if it exists, else write a new one. Never duplicates. */
 function saveDoc_(p){
   var ss=SpreadsheetApp.openById(BOOK_ID);
@@ -736,6 +771,7 @@ function saveDoc_(p){
       .flush();                                                          // one write instead of ~15
     return {row:found.row, tab:found.sh.getName()};
   }
+  if(!p.inv && !p.force){ var g=poGuard_(p,true); if(g) return {dup:g}; }         // a Save that would CREATE a PO Request row gets the same duplicate check
   return appendDoc_(p, p.inv?'invoice':'po');   // not on the sheet yet → create it (no duplicate)
 }
 /* ============================ ACCESS LOG (sign-in audit) ============================ */
