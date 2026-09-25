@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.25-5 · built 2026-09-25 05:37 EDT · 0 · Inbox: "PO_Request_…" email/download names file as PO Requests ==== */
+/* ==== VERSION 2026.09.25-6 · built 2026-09-25 06:14 EDT · Save re-files the PDF (replaces the old copy) so edits reach Drive ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.25-5', CODE_BUILT='2026-09-25 05:37 EDT';
+var CODE_VERSION='2026.09.25-6', CODE_BUILT='2026-09-25 06:14 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -803,6 +803,10 @@ function saveDoc_(p){
       .set(A.cName,p.contactName||p.contact).set(A.cEmail,p.contactEmail).set(A.cPhone,p.contactPhone)
       .set(A.status, p.inv?'Invoiced':'Requested')
       .flush();                                                          // one write instead of ~15
+    if(p.pdfB64){                                                        // edits on Save: re-file the PDF (savePdf_ trashes the older copy of the same doc)
+      var act=p.inv?'invoice':'po', url=savePdf_(p,act);
+      if(url && url.indexOf('ERR:')!==0){ var lc=col_(fm,act==='invoice'?A.invPdf:A.poReqPdf); if(lc>=0) found.sh.getRange(found.row,lc+1).setValue(url); }
+    }
     return {row:found.row, tab:found.sh.getName()};
   }
   if(!p.inv && !p.force){ var g=poGuard_(p,true); if(g) return {dup:g}; }         // a Save that would CREATE a PO Request row gets the same duplicate check
