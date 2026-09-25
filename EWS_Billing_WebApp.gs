@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.25-4 · built 2026-09-25 04:55 EDT · Orphan check + high-water mark: plain EWS-POR series only (OP/ES history ignored) ==== */
+/* ==== VERSION 2026.09.25-5 · built 2026-09-25 05:37 EDT · 0 · Inbox: "PO_Request_…" email/download names file as PO Requests ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.25-4', CODE_BUILT='2026-09-25 04:55 EDT';
+var CODE_VERSION='2026.09.25-5', CODE_BUILT='2026-09-25 05:37 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1390,7 +1390,7 @@ function classifyInboxPdf_(X,f,name){
   }
   var hint = ps ? ps.action
            : /sign/i.test(name) ? 'signed'
-           : /po\s*req/i.test(name) ? 'po'                                   // only an explicit "PO Request" — a bare POR # on a dropped file is usually the customer's PO
+           : /po[\s_-]*req/i.test(name) ? 'po'                               // only an explicit "PO Request" (also "PO_Request_EWS-POR-…", the email/download name) — a bare POR # on a dropped file is usually the customer's PO
            : /invoice|\binv\b/i.test(name) ? 'signed'
            : /purchase\s*order|\bP\.?O\.?\b/i.test(name) ? 'custpo' : '';
   var hit=find(name), why='name';
