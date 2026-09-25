@@ -1213,6 +1213,11 @@ function computeLeaks(){
   var pg={}; rows.forEach(function(x){ if(!x.poReq||x.inv||isPaid(x)) return; var k=poDupKey(x); (pg[k]=pg[k]||[]).push(x); });   // open PO Requests with identical details
   var a6=[]; Object.keys(pg).forEach(function(k){ if(pg[k].length>1) pg[k].forEach(function(x){ if(!leakDismissed('pordup',x)) a6.push(x); }); });
   if(a6.length) out.push({key:"pordup",sev:"crit",label:"Possible duplicate PO Requests",desc:"Open PO Requests with the same unit, operator, pad, category and amount — usually the same job generated twice. Delete the extra row (and its PDF).",items:a6,amount:0,note:a6.length+" row(s)",jump:true});
+  var pj={}; rows.forEach(function(x){ var k=porNormKey(x.poReq); if(k) (pj[k]=pj[k]||[]).push(x); });   // 9/25: POR-25 was on a Jan CNX Leto invoice AND a new Consumables job
+  var a7=[]; Object.keys(pj).forEach(function(k){ var g=pj[k]; if(g.length<2) return;
+    var clash=g.some(function(a,i){ return g.slice(i+1).some(function(b){ return !sameJob(a,b); }); });
+    if(clash) g.forEach(function(x){ if(!leakDismissed('porjob',x)) a7.push(x); }); });
+  if(a7.length) out.push({key:"porjob",sev:"crit",label:"PO Request # used for different jobs",desc:"The same PO Request # is on rows with a different operator or location \u2014 usually a number that was reused or typed onto the wrong row. PDFs filed under that # can be named after the wrong job. Clear the # from the row it doesn't belong to.",items:a7,amount:0,note:a7.length+" row(s)",jump:true});
   var ao=ORPHANS.filter(function(f){ return LEAK_SHOW_ALL || !LEAK_DISMISSED.has("orphanpdf::inv"+f.id); }).map(function(f){ return {__orphan:true,inv:f.id,name:f.name,url:f.url,created:f.created}; });
   if(ao.length) out.push({key:"orphanpdf",sev:"warn",label:"PO Request PDF with no row on the sheet",desc:"A PO Request PDF is filed in Drive but its number isn't on the Billing Tracker \u2014 usually a leftover from a request that was re-generated under a new number or deleted. Check it wasn't sent, then move it out of the filing folders.",items:(ao.length>1?[{__orphanAll:true}]:[]).concat(ao),count:ao.length,amount:0,note:ao.length+" file(s)"});
   var invPaid=function(n){ var rs=rows.filter(function(r){return String(r.inv||"").trim()===String(n);}); return rs.length>0 && rs.every(function(r){return isPaid(r);}); };
@@ -1563,6 +1568,12 @@ function loadOrphans(fresh){ if(!CONFIG.EXEC_URL) return;
       if(j&&Array.isArray(j.files)){ ORPHANS=j.files.filter(function(o){ return isPlainPor(o.name); }); try{ renderLeakGuard(); }catch(e){} } }).catch(function(){}); }
 /* Only the plain EWS-POR-###### series counts. The OP-/ES- blanket requests (EWS-POR-OP-00014, EWS-POR-ES-9001) are
    legitimate older history, not orphans, and their numbers must never drive the next PO Request #. */
+function porNormKey(s){ var m=String(s==null?"":s).match(/EWSO?\s*-?\s*POR\s*-?\s*(?:([A-Z]{2})\s*-?\s*)?(\d+)/i); return m?("EWSPOR"+(m[1]?m[1].toUpperCase():"")+Number(m[2])):""; }   // mirrors porNorm_ in the backend
+function jobTxt(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+function sameJob(a,b){ var oa=jobTxt(a.operator), ob=jobTxt(b.operator), la=jobTxt(a.location), lb=jobTxt(b.location);
+  if(oa&&ob&&oa!==ob) return false;
+  if(la&&lb&&la.indexOf(lb)<0&&lb.indexOf(la)<0) return false;   // "NNE Miracle" ≈ "NNE Miracle Run"
+  return true; }
 function isPlainPor(s){ return /^\s*EWS-POR-\d+\b/i.test(String(s||"")); }
 function sheetPorMax(){ var m=0; DATA.rows.forEach(function(r){ if(isPlainPor(r.poReq)){ var n=poReqNum(r.poReq); if(n>m)m=n; } }); return m; }
 function setPorHigh(v){ var n=Number(v)||0, cap=sheetPorMax()+100; if(n>0 && (!DATA.rows.length || n<=cap)) POR_HIGH=Math.max(POR_HIGH,n); }   // ignore an implausible high-water mark
