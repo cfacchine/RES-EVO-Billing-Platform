@@ -1711,7 +1711,7 @@ function pullId(v,field){
   toast("Pulled "+label+" "+q+(matches.length>1?" ("+matches.length+" matches — loaded the most recent)":""));
 }
 /* Save the current document's changes — local record memory always, plus an upsert to the sheet when live. */
-function saveBuilder(v){
+async function saveBuilder(v){
   var b=B[v], s=state[v], isInv=s.mode==="INVOICE";
   if(!isInv && !s.poReq) s.poReq=nextPoReq();
   if(!isInv) markIssuedPoReq(s.poReq);
@@ -1723,12 +1723,13 @@ function saveBuilder(v){
   renderBuilder(v);
   if(!CONFIG.EXEC_URL){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved on this device."); return; }
   toast("Saving changes to "+num+"…");
+  try{ var blob=await docPdfBlob(v); if(blob) recd.pdfB64=await blobToB64(blob); }catch(e){}   // re-file the PDF so Drive matches the edited lines
   postToSheet({action:"save",payload:recd}).then(function(res){
     if(res&&res.dup){ choicePopup("Not saved — possible duplicate", res.dup.msg+"\n\n"+dupLine(res.dup)+"\n\nNothing was written to the sheet.",
         [{label:"Open "+res.dup.poReq,primary:true,fn:function(){ var x=DATA.rows.find(function(r){return String(r.poReq||"").trim()===String(res.dup.poReq).trim();}); if(x) openRecord(x.id); else loadData(); }},
          {label:"Save anyway",fn:function(){ recd.force=true; postToSheet({action:"save",payload:recd}).then(function(r2){ if(r2&&r2.ok){ ackPopup("Changes Saved",num+" has been saved to the sheet."); afterWrite(r2); } else toast("Sheet reported: "+((r2&&r2.error)||"no reply"),"warn"); }); }}]);
       return; }
-    if(res&&res.ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved to the sheet."); afterWrite(res); }
+    if(res&&res.ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved to the sheet"+(recd.pdfB64&&BACKEND_VER>="2026.09.25-6"?" and its PDF in Drive was replaced with this version.":recd.pdfB64?".  (The Drive PDF will update on Save once backend 2026.09.25-6 is deployed.)":".  The PDF didn't render, so the copy in Drive was NOT updated \u2014 click Download PDF and drop it into EWS Billing \u203a 0 \u00b7 Inbox.")); afterWrite(res); }
     else if(res&&res.error){ ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here, but the sheet reported: "+res.error+"  (Redeploy the web app to enable saving changes to the sheet.)"); }
     else { ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here.  Redeploy the web app (new version) to save changes straight to the sheet."); }
   }).catch(function(err){
