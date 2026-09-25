@@ -818,6 +818,7 @@ function applyConfig(b){
        var ops=cl(ls&&ls.operators), dsc=cl(ls&&ls.disc);
        if(ops.length) OPERATORS=ops;
        if(dsc.length) DISC=dsc; }catch(e){}
+  try{ if(b&&b.porHigh) POR_HIGH=Math.max(POR_HIGH,Number(b.porHigh)||0); }catch(e){}
   try{ if(b&&b.pipeOrder&&typeof b.pipeOrder==="object"){ PIPE_ORDER=b.pipeOrder; try{ localStorage.setItem("revo-pipeorder",JSON.stringify(PIPE_ORDER)); }catch(e){} } }catch(e){}
   try{ if(em&&typeof em==="object"){ ["poReq","invoice","reminder","collections"].forEach(function(k){ if(Array.isArray(em[k])&&em[k].length) EMAIL_CC[k]=em[k]; }); } }catch(e){}
 }
@@ -1206,6 +1207,9 @@ function computeLeaks(){
   var seen={},dups={}; rows.forEach(function(x){ var n=String(x.inv||"").trim(); if(!n)return; if(seen[n])dups[n]=(dups[n]||1)+1; else seen[n]=1; });
   var dupNums=Object.keys(dups);
   if(dupNums.length){ var a5=rows.filter(function(x){return dups[String(x.inv||"").trim()]&&!leakDismissed('dup',x);}); if(a5.length) out.push({key:"dup",sev:"crit",label:"Duplicate invoice numbers",desc:"The same invoice # is on more than one row — a double-count or a numbering error. Reconcile them.",items:a5,amount:0,note:a5.length+" row(s)",jump:true}); }
+  var pg={}; rows.forEach(function(x){ if(!x.poReq||x.inv||isPaid(x)) return; var k=poDupKey(x); (pg[k]=pg[k]||[]).push(x); });   // open PO Requests with identical details
+  var a6=[]; Object.keys(pg).forEach(function(k){ if(pg[k].length>1) pg[k].forEach(function(x){ if(!leakDismissed('pordup',x)) a6.push(x); }); });
+  if(a6.length) out.push({key:"pordup",sev:"crit",label:"Possible duplicate PO Requests",desc:"Open PO Requests with the same unit, operator, pad, category and amount — usually the same job generated twice. Delete the extra row (and its PDF).",items:a6,amount:0,note:a6.length+" row(s)",jump:true});
   var invPaid=function(n){ var rs=rows.filter(function(r){return String(r.inv||"").trim()===String(n);}); return rs.length>0 && rs.every(function(r){return isPaid(r);}); };
   var gaps=[]; ["50","51"].forEach(function(pfx){
     var nums=[...new Set(rows.map(function(x){return String(x.inv||"").trim();}).filter(function(n){return n.length===5&&n.slice(0,2)===pfx&&/^\d+$/.test(n);}).map(Number))].sort(function(a,b){return a-b;});
@@ -1508,6 +1512,7 @@ var state={
   ops:{ mode:"PO REQUEST", fleet:"13", operator:"EQT", location:"", disc:"", contact:"Ryan Poorman", contactInfo:"", start:"", end:"", date:iso(TODAY), poReq:"", po:"", inv:"", terms:"Net 60", notes:"", lines:[] }
 };
 function iso(d){ return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }   // LOCAL calendar day - toISOString() alone is UTC, so anything entered after 8pm ET was stamped tomorrow
+var POR_HIGH=0;         // highest PO Request # ever issued (server high-water mark) — never reuse a number whose row was deleted
 var ISSUED_POREQ={};   // PO Request numbers generated/saved this session — dedupe guard (until loadData refreshes DATA)
 function poReqNum(s){ var g=(""+s).match(/(\d+)\s*$/); return g?+g[1]:0; }
 function markIssuedPoReq(n){ if(n) ISSUED_POREQ[String(n).trim().toLowerCase()]=1; }
@@ -1515,7 +1520,32 @@ function poReqExists(q){ q=String(q||"").trim().toLowerCase(); if(!q) return fal
 function nextPoReq(){ var m=0;
   DATA.rows.forEach(function(r){ var n=poReqNum(r.poReq); if(n>m)m=n; });
   Object.keys(ISSUED_POREQ).forEach(function(k){ var n=poReqNum(k); if(n>m)m=n; });
+  if(POR_HIGH>m) m=POR_HIGH;
   return "EWS-POR-"+String(m+1).padStart(6,"0"); }
+/* ---- Duplicate PO Request guard (2026-09-25) — a stale builder re-Generated 000028/29 as 000036/37 on 9/24 ---- */
+function poReqOnSheet(q){ q=String(q||"").trim().toLowerCase(); return !!q && DATA.rows.find(function(r){return String(r.poReq||"").trim().toLowerCase()===q;}); }
+function poDupKey(x){ return [String(x.unit||""),String(x.operator||"").trim().toLowerCase(),String(x.location||"").trim().toLowerCase(),String(x.disc||"").trim().toLowerCase(),(Math.round((Number(x.amount)||0)*100))].join("|"); }
+function findPoDup(v){   // an OPEN (not invoiced, not paid) PO Request with the same unit + operator + pad + category + amount
+  var b=B[v], s=state[v], me=String(s.poReq||"").trim().toLowerCase();
+  var k=poDupKey({unit:b.key,operator:s.operator,location:s.location,disc:s.disc,amount:docLines(v).reduce(function(a,l){return a+l.total;},0)});
+  return DATA.rows.find(function(x){ return x.poReq && !x.inv && !isPaid(x) && String(x.poReq).trim().toLowerCase()!==me && poDupKey(x)===k; });
+}
+function dupLine(x){ return x.poReq+"  ·  "+[x.operator,x.location,x.disc].filter(Boolean).join(" – ")+"  ·  "+money(x.amount)+(x.date?"  ·  "+x.date:""); }
+/* Choice popup: title, message, buttons [{label, primary, fn}] — Cancel is always added. */
+function choicePopup(title,msg,buttons){
+  closeAck(); var mo=document.getElementById("choiceModal");
+  if(!mo){ mo=document.createElement("div"); mo.className="modal"; mo.id="choiceModal"; document.body.appendChild(mo); }
+  var btn=function(l,pri,i){ return '<button data-i="'+i+'" style="background:'+(pri?'#c2410c':'#fff')+';color:'+(pri?'#fff':'#3a473f')+';border:'+(pri?'0':'1px solid #cbd5d0')+';border-radius:9px;padding:10px 18px;font-weight:700;font-size:13.5px;cursor:pointer;font-family:\'Archivo\',sans-serif;margin:4px">'+l+'</button>'; };
+  var esc=function(t){ return String(t).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); };
+  mo.innerHTML='<div class="modal-inner" style="max-width:480px"><div style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.4)">'
+    +'<div style="height:6px;background:linear-gradient(90deg,#c2410c,#f59e0b)"></div><div style="padding:24px 26px 20px;text-align:center">'
+    +'<div style="font-family:\'Archivo\',sans-serif;font-weight:800;font-size:18px;color:#7c2d12;margin-bottom:8px">'+esc(title)+'</div>'
+    +'<div style="font-size:13.5px;line-height:1.55;color:#3a473f;margin-bottom:18px;white-space:pre-line">'+esc(msg)+'</div><div>'
+    +buttons.map(function(x,i){return btn(esc(x.label),x.primary,i);}).join("")+btn("Cancel",false,-1)+'</div></div></div></div>';
+  mo.onclick=function(e){ var t=e.target.closest?e.target.closest("button[data-i]"):null; if(e.target===mo){ mo.classList.remove("open"); return; } if(!t) return;
+    mo.classList.remove("open"); var i=+t.getAttribute("data-i"); if(i>=0&&buttons[i]&&buttons[i].fn) buttons[i].fn(); };
+  mo.classList.add("open");
+}
 function nextInv(series){ var m=0; DATA.rows.forEach(function(r){var s=(""+r.inv).trim(); if(s.indexOf(series)===0){var n=+s; if(n>m)m=n;}}); return m>0?String(m+1):series+"0000"; }
 function workType(s){ return [s.operator,s.location,s.disc].filter(Boolean).join(" – "); }
 
@@ -1667,6 +1697,10 @@ function saveBuilder(v){
   if(!CONFIG.EXEC_URL){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved on this device."); return; }
   toast("Saving changes to "+num+"…");
   postToSheet({action:"save",payload:recd}).then(function(res){
+    if(res&&res.dup){ choicePopup("Not saved — possible duplicate", res.dup.msg+"\n\n"+dupLine(res.dup)+"\n\nNothing was written to the sheet.",
+        [{label:"Open "+res.dup.poReq,primary:true,fn:function(){ var x=DATA.rows.find(function(r){return String(r.poReq||"").trim()===String(res.dup.poReq).trim();}); if(x) openRecord(x.id); else loadData(); }},
+         {label:"Save anyway",fn:function(){ recd.force=true; postToSheet({action:"save",payload:recd}).then(function(r2){ if(r2&&r2.ok){ ackPopup("Changes Saved",num+" has been saved to the sheet."); afterWrite(r2); } else toast("Sheet reported: "+((r2&&r2.error)||"no reply"),"warn"); }); }}]);
+      return; }
     if(res&&res.ok){ ackPopup("Changes Saved", (isInv?"Invoice ":"PO Request ")+num+" has been saved to the sheet."); afterWrite(res); }
     else if(res&&res.error){ ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here, but the sheet reported: "+res.error+"  (Redeploy the web app to enable saving changes to the sheet.)"); }
     else { ackPopup("Saved on This Device", (isInv?"Invoice ":"PO Request ")+num+" was saved here.  Redeploy the web app (new version) to save changes straight to the sheet."); }
@@ -1678,14 +1712,31 @@ function saveBuilder(v){
     });
   });
 }
-async function generate(v){
+async function generate(v,opts){
+  opts=opts||{};
   var b=B[v], s=state[v], isInv=s.mode==="INVOICE", lines=docLines(v);
   if(!lines.length){ toast("Add at least one line item first","warn"); return; }
   if(isInv && !String(s.po||"").trim()){ toast("Enter the Customer PO # before invoicing","warn"); return; }
   if(isInv){ if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50"); }
-  else { if(!s.poReq || poReqExists(s.poReq)) s.poReq=nextPoReq(); markIssuedPoReq(s.poReq); }   // always a unique next PO Request #
+  else {
+    var onSheet=!opts.newNum && s.poReq && poReqOnSheet(s.poReq);
+    if(onSheet){   // this PO Request is already on the sheet — don't silently issue a new number (that's how 000036/37 happened)
+      choicePopup("PO Request "+s.poReq+" already exists",
+        "It's already on the Billing Tracker:\n"+dupLine(onSheet)+"\n\nUpdate it with what's in the builder, or create a separate PO Request with a new number?",
+        [{label:"Update "+s.poReq,primary:true,fn:function(){ saveBuilder(v); }},
+         {label:"Create new PO Request",fn:function(){ generate(v,{newNum:true}); }}]);
+      return;
+    }
+    if(!opts.force){ var dup=findPoDup(v);
+      if(dup){ choicePopup("Looks like a duplicate",
+        "An open PO Request already has the same unit, operator, pad, category and amount:\n"+dupLine(dup)+"\n\nOpen that one instead, or create a new PO Request anyway?",
+        [{label:"Open "+dup.poReq,primary:true,fn:function(){ openRecord(dup.id); }},
+         {label:"Create anyway",fn:function(){ generate(v,{newNum:true,force:true}); }}]);
+        return; } }
+    if(opts.keep!==s.poReq && (!s.poReq || poReqExists(s.poReq))) s.poReq=nextPoReq();
+    markIssuedPoReq(s.poReq); }   // always a unique next PO Request #
   var num=isInv?s.inv:s.poReq;
-  var recd=collect(v);
+  var recd=collect(v); if(opts.force) recd.force=true;
   RECORDS[s.poReq||num]={ header:recd, lines:s.lines.slice() };   // remember line items (this session)
   saveRec([s.poReq,s.inv,num], recd);                             // remember the FULL record across sessions (this browser)
   renderBuilder(v);
@@ -1694,6 +1745,11 @@ async function generate(v){
   toast("Saving "+(isInv?"Invoice ":"PO Request ")+num+"…");
   try{ var blob=await docPdfBlob(v); if(blob) recd.pdfB64=await blobToB64(blob); }catch(e){}   // attach the exact PDF for the Drive save
   postToSheet({action:isInv?"invoice":"po",payload:recd}).then(function(res){
+    if(res&&res.dup){ var keep=s.poReq;   // the sheet refused it as a duplicate — nothing was written or filed
+      choicePopup("Not saved — possible duplicate", res.dup.msg+"\n\n"+dupLine(res.dup)+"\n\nNothing was written to the sheet or Drive.",
+        [{label:"Open "+res.dup.poReq,primary:true,fn:function(){ var x=DATA.rows.find(function(r){return String(r.poReq||"").trim()===String(res.dup.poReq).trim();}); if(x) openRecord(x.id); else loadData(); }},
+         {label:"Create anyway",fn:function(){ generate(v,{newNum:true,force:true,keep:keep}); }}]);
+      return; }
     if(res&&res.error){ toast("Saved on this device, but the sheet reported: "+res.error,"warn"); }
     else { toast((isInv?"Invoice ":"PO Request ")+num+" saved to the sheet"+(recd.pdfB64?" + PDF filed in Drive":"")); afterWrite(res); }
   }).catch(function(err){
