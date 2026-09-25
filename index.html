@@ -1518,7 +1518,6 @@ var state={
 };
 function iso(d){ return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }   // LOCAL calendar day - toISOString() alone is UTC, so anything entered after 8pm ET was stamped tomorrow
 var POR_HIGH=0, BACKEND_VER="", ORPHANS=[];   // ORPHANS: PO Request PDFs in Drive with no row on the sheet (backend 2026.09.25-3+)
-        // highest PO Request # ever issued (server high-water mark) — never reuse a number whose row was deleted
 var ISSUED_POREQ={};   // PO Request numbers generated/saved this session — dedupe guard (until loadData refreshes DATA)
 function poReqNum(s){ var g=(""+s).match(/(\d+)\s*$/); return g?+g[1]:0; }
 function markIssuedPoReq(n){ if(n) ISSUED_POREQ[String(n).trim().toLowerCase()]=1; }
@@ -1527,6 +1526,7 @@ function nextPoReq(){ var m=0;
   DATA.rows.forEach(function(r){ var n=poReqNum(r.poReq); if(n>m)m=n; });
   Object.keys(ISSUED_POREQ).forEach(function(k){ var n=poReqNum(k); if(n>m)m=n; });
   if(POR_HIGH>m) m=POR_HIGH;
+  ORPHANS.forEach(function(o){ var n=poReqNum(o.poReq); if(n>m)m=n; });   // never reuse a number an orphan PDF already carries
   return "EWS-POR-"+String(m+1).padStart(6,"0"); }
 /* ---- Duplicate PO Request guard (2026-09-25) — a stale builder re-Generated 000028/29 as 000036/37 on 9/24 ---- */
 function poReqOnSheet(q){ q=String(q||"").trim().toLowerCase(); return !!q && DATA.rows.find(function(r){return String(r.poReq||"").trim().toLowerCase()===q;}); }
@@ -1538,7 +1538,8 @@ function findPoDup(v){   // an OPEN (not invoiced, not paid) PO Request with the
 }
 function loadOrphans(fresh){ if(!CONFIG.EXEC_URL) return;
   fetch(CONFIG.EXEC_URL+"?action=orphanpdfs"+(fresh?"&fresh=1":"")+"&t="+Date.now()).then(function(r){return r.json();})
-    .then(function(j){ if(j&&Array.isArray(j.files)){ ORPHANS=j.files; try{ renderLeakGuard(); }catch(e){} } }).catch(function(){}); }
+    .then(function(j){ if(j&&j.porHigh) POR_HIGH=Math.max(POR_HIGH,Number(j.porHigh)||0);
+      if(j&&Array.isArray(j.files)){ ORPHANS=j.files; try{ renderLeakGuard(); }catch(e){} } }).catch(function(){}); }
 function quarantineOrphan(id){
   var list=ORPHANS.filter(function(o){ return id==="*" ? !LEAK_DISMISSED.has("orphanpdf::inv"+o.id) : o.id===id; }); if(!list.length) return;
   choicePopup(list.length>1?"Move "+list.length+" PDFs out of the filing folders?":"Move this PDF out of the filing folders?",
