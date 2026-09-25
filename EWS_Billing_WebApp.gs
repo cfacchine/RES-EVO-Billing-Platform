@@ -767,7 +767,8 @@ function orphanPdfs_(){
     out.push({id:file.getId(), name:name, url:file.getUrl(), poReq:porDisplay_(por),
               created:Utilities.formatDate(file.getDateCreated(), ss.getSpreadsheetTimeZone()||'America/New_York', 'M/d/yyyy')});
   });
-  return {files:out};
+  out.forEach(function(f){ bumpPorHigh_(f.poReq); });                          // a number used by any filed PDF is never issued again
+  return {files:out, porHigh:getPorHigh_()};
 }
 /* Move orphan PDFs (by id) to "_Trash - Review" in the EWS Billing folder. Only files that are STILL orphans move; nothing is deleted. */
 function quarantinePdfs_(p){
