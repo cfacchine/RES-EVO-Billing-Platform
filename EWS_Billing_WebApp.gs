@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.25-3 · built 2026-09-25 04:33 EDT · Duplicate PO Request guard + high-water mark + orphan PO Request PDF check ==== */
+/* ==== VERSION 2026.09.25-4 · built 2026-09-25 04:55 EDT · Orphan check + high-water mark: plain EWS-POR series only (OP/ES history ignored) ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.25-3', CODE_BUILT='2026-09-25 04:33 EDT';
+var CODE_VERSION='2026.09.25-4', CODE_BUILT='2026-09-25 04:55 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -763,6 +763,7 @@ function orphanPdfs_(){
     var name=file.getName(), ps=parseScheme_(name), por='';
     if(ps){ if(ps.step===1) por=ps.job; }                                      // "<Job ID> - 1 PO Request - …"
     else if(/^\s*EWSO?\s*-?\s*POR/i.test(name)) por=name;                        // older "EWS-POR-000030 - EQT - … .pdf" names
+    if(!plainPor_(por)) return;                                                // OP-/ES- blanket requests are known history, never orphans
     var k=porNorm_(por); if(!k || have[k]) return;
     out.push({id:file.getId(), name:name, url:file.getUrl(), poReq:porDisplay_(por),
               created:Utilities.formatDate(file.getDateCreated(), ss.getSpreadsheetTimeZone()||'America/New_York', 'M/d/yyyy')});
@@ -780,9 +781,12 @@ function quarantinePdfs_(p){
 }
 /* PO Request # high-water mark: the highest number ever issued, kept even if its row is later deleted, so a
    number is never handed out twice (000036 was used on 9/23, its row vanished, and 36 was issued again 9/24). */
-function getPorHigh_(){ return Number(PropertiesService.getScriptProperties().getProperty('POR_HIGH')||0); }
-function bumpPorHigh_(poReq){ var g=String(poReq||'').match(/(\d+)\s*$/); if(!g) return; var n=+g[1];
-  try{ var pr=PropertiesService.getScriptProperties(); if(n>Number(pr.getProperty('POR_HIGH')||0)) pr.setProperty('POR_HIGH',String(n)); }catch(e){} }
+/* Plain series only: "EWS-POR-000036". The OP-/ES- series (EWS-POR-ES-9001) are separate older numbering and must not
+   move the mark — 2026.09.25-3 let ES-9001 set it to 9001, so the mark now lives under a new key (POR_HIGH_V2). */
+function plainPor_(s){ return /^\s*EWSO?\s*-?\s*POR\s*-?\s*\d+/i.test(String(s||'')); }
+function getPorHigh_(){ return Number(PropertiesService.getScriptProperties().getProperty('POR_HIGH_V2')||0); }
+function bumpPorHigh_(poReq){ if(!plainPor_(poReq)) return; var g=String(poReq).match(/(\d+)\s*$/); if(!g) return; var n=+g[1];
+  try{ var pr=PropertiesService.getScriptProperties(); if(n>Number(pr.getProperty('POR_HIGH_V2')||0)) pr.setProperty('POR_HIGH_V2',String(n)); }catch(e){} }
 /* Upsert a document by PO Request # (or Invoice #) — update the row in place if it exists, else write a new one. Never duplicates. */
 function saveDoc_(p){
   var ss=SpreadsheetApp.openById(BOOK_ID);
