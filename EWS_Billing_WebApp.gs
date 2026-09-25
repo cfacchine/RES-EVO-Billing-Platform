@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.24-1 · built 2026-09-24 17:05 EDT · Invoice Date written as a clean ISO day (fixes 0.1666 Days Outstanding) ==== */
+/* ==== VERSION 2026.09.25-1 · built 2026-09-25 03:16 EDT · Signed column written as "Yes" (was "X") ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.24-1', CODE_BUILT='2026-09-24 17:05 EDT';
+var CODE_VERSION='2026.09.25-1', CODE_BUILT='2026-09-25 03:16 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -617,7 +617,7 @@ function updateRow_(p){
   var mark=(String(p.value).toLowerCase().charAt(0)==='y')?'Yes':'No';
   var f=findRowBy_(ss,A.inv,p.inv); if(!f) return false;                      // #7: one-column lookup
   var iCol=col_(f.m,target);
-  if(iCol>=0) f.sh.getRange(f.row,iCol+1).setValue(mark==='Yes'?(isPaid?'Yes':'X'):'');
+  if(iCol>=0) f.sh.getRange(f.row,iCol+1).setValue(mark==='Yes'?((isPaid||p.field==='signed')?'Yes':'X'):'');   // Signed and Paid write "Yes"; x_() still reads old X cells as Yes
   if(isPaid){ var iSt=col_(f.m,A.status);
     if(iSt>=0){ var stc=f.sh.getRange(f.row,iSt+1), cur=String(stc.getValue()||'').trim();
       if(mark==='Yes') stc.setValue('Paid');
