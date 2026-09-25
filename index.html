@@ -1213,7 +1213,7 @@ function computeLeaks(){
   var pg={}; rows.forEach(function(x){ if(!x.poReq||x.inv||isPaid(x)) return; var k=poDupKey(x); (pg[k]=pg[k]||[]).push(x); });   // open PO Requests with identical details
   var a6=[]; Object.keys(pg).forEach(function(k){ if(pg[k].length>1) pg[k].forEach(function(x){ if(!leakDismissed('pordup',x)) a6.push(x); }); });
   if(a6.length) out.push({key:"pordup",sev:"crit",label:"Possible duplicate PO Requests",desc:"Open PO Requests with the same unit, operator, pad, category and amount — usually the same job generated twice. Delete the extra row (and its PDF).",items:a6,amount:0,note:a6.length+" row(s)",jump:true});
-  var ao=ORPHANS.filter(function(f){ return !LEAK_DISMISSED.has("orphanpdf::inv"+f.id); }).map(function(f){ return {__orphan:true,inv:f.id,name:f.name,url:f.url,created:f.created}; });
+  var ao=ORPHANS.filter(function(f){ return LEAK_SHOW_ALL || !LEAK_DISMISSED.has("orphanpdf::inv"+f.id); }).map(function(f){ return {__orphan:true,inv:f.id,name:f.name,url:f.url,created:f.created}; });
   if(ao.length) out.push({key:"orphanpdf",sev:"warn",label:"PO Request PDF with no row on the sheet",desc:"A PO Request PDF is filed in Drive but its number isn't on the Billing Tracker \u2014 usually a leftover from a request that was re-generated under a new number or deleted. Check it wasn't sent, then move it out of the filing folders.",items:(ao.length>1?[{__orphanAll:true}]:[]).concat(ao),count:ao.length,amount:0,note:ao.length+" file(s)"});
   var invPaid=function(n){ var rs=rows.filter(function(r){return String(r.inv||"").trim()===String(n);}); return rs.length>0 && rs.every(function(r){return isPaid(r);}); };
   var gaps=[]; ["50","51"].forEach(function(pfx){
@@ -1222,7 +1222,7 @@ function computeLeaks(){
     for(var i=1;i<nums.length;i++){ var g=nums[i]-nums[i-1];
       if(g>1&&g<=10){
         if(invPaid(nums[i-1])&&invPaid(nums[i])) continue;   // legacy: a gap bracketed by two already-paid invoices predates active tracking — ignore
-        for(var n=nums[i-1]+1;n<nums[i];n++){ if(!LEAK_DISMISSED.has('gap::inv'+String(n))) gaps.push(String(n)); }   // only small skips between consecutive invoices — a big jump is a numbering discontinuity, not a missing invoice (dismissed gaps excluded)
+        for(var n=nums[i-1]+1;n<nums[i];n++){ if(LEAK_SHOW_ALL || !LEAK_DISMISSED.has('gap::inv'+String(n))) gaps.push(String(n)); }   // only small skips between consecutive invoices — a big jump is a numbering discontinuity, not a missing invoice (dismissed gaps excluded)
       }
     }
   });
@@ -1236,7 +1236,9 @@ function computeLeaks(){
 function renderLeakGuard(){
   var leaks=computeLeaks(), el=document.getElementById("leakBody"); if(!el) return;
   document.getElementById("leakCount").textContent=leaks.length;
-  var foot = LEAK_DISMISSED.size ? '<div class="leak-dismissed">'+LEAK_DISMISSED.size+' item(s) dismissed · <a href="#" onclick="restoreLeaks();return false;">restore all</a></div>' : '';
+  migrateDismissed();
+  var hid=activeDismissed();   // only dismissals still hiding a flag are listed; stale ones (issue resolved) disappear on their own
+  var foot = hid.length ? '<div class="leak-dismissed">Dismissed: '+hid.map(function(d){ return '<span title="'+esc(d.what)+'">'+esc(d.label)+'</span> <a href="#" onclick="restoreLeak(\''+d.fullKey.replace(/[\\\']/g,'')+'\');return false;">restore</a>'; }).join(' · ')+(hid.length>1?' · <a href="#" onclick="restoreLeaks();return false;">restore all</a>':'')+'</div>' : '';
   var riskKeys={unbilled:1,nopo:1,nopdf:1,stuck:1}, idset={}, sum=0;   // hard, quantifiable exposure only — sequence gaps are a review flag, not counted here
   leaks.forEach(function(L){ if(riskKeys[L.key]) L.items.forEach(function(x){ if(x.id!=null&&!idset[x.id]){idset[x.id]=1; sum+=x.amount||0;} }); });
   var risk=document.getElementById("leakAtRisk"); if(risk) risk.innerHTML=leaks.length? ("<b>"+money0(sum)+"</b> at risk / recoverable") : "All clear";
@@ -1247,7 +1249,7 @@ function renderLeakGuard(){
     var cnt=(L.count!=null?L.count:L.items.length);
     var lis=L.items.map(function(x){
       if(x.__more) return '<div class="leak-li"><span class="sub">'+esc(x.inv)+'</span></div>';
-      var dk = L.key+'::'+(x.id!=null?('id'+x.id):('inv'+(x.inv||'')));
+      var dk = leakKeyFor(L.key,x);
       var trash='<button class="leak-x" title="Dismiss — checked, not a concern" onclick="dismissLeak(\''+dk+'\')"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button>';
       if(x.__orphanAll) return '<div class="leak-li"><span></span><span class="li-right"><a href="#" onclick="quarantineOrphan(\'*\');return false;">move all to _Trash - Review \u25b8</a></span></div>';
       if(x.__orphan) return '<div class="leak-li"><span>'+esc(x.name)+(x.created?' \u00b7 filed '+esc(x.created):'')+'</span><span class="li-right"><a href="'+esc(x.url)+'" target="_blank" rel="noopener">view \u25b8</a> <a href="#" onclick="quarantineOrphan(\''+x.inv+'\');return false;">move \u25b8</a>'+trash+'</span></div>';
@@ -1386,9 +1388,26 @@ function kfmt(v){ v=Math.round(v||0); var s=v<0?'-':''; v=Math.abs(v); if(v>=1e6
 /* ---- Revenue-Leak Guard dismissals (persisted per browser) ---- */
 var LEAK_DISMISSED=(function(){ try{ return new Set(JSON.parse(localStorage.getItem('revo-leak-dismissed')||'[]')); }catch(e){ return new Set(); } })();
 function saveDismissed(){ try{ localStorage.setItem('revo-leak-dismissed', JSON.stringify(Array.from(LEAK_DISMISSED))); }catch(e){} }
-function leakKeyFor(k,x){ return k+'::'+(x&&x.id!=null?('id'+x.id):('inv'+((x&&x.inv)||''))); }
-function leakDismissed(k,x){ return LEAK_DISMISSED.has(leakKeyFor(k,x)); }
+/* Keys are tied to the Invoice # / PO Request # (not the row's position), so deleting or adding rows can't move a
+   dismissal onto a different row. Older position-based keys ("…::id123") are converted once, against the rows they hid. */
+function leakKeyFor(k,x){ x=x||{}; var inv=String(x.inv||'').trim(), por=String(x.poReq||'').trim().toLowerCase();
+  return k+'::'+(inv?('inv'+inv):por?('por'+por):(x.id!=null?('id'+x.id):'')); }
+var LEAK_SHOW_ALL=false;   // true while working out which dismissals are still hiding something
+function leakDismissed(k,x){ return !LEAK_SHOW_ALL && LEAK_DISMISSED.has(leakKeyFor(k,x)); }
+function migrateDismissed(){ if(!DATA.rows.length) return; var changed=false;
+  Array.from(LEAK_DISMISSED).forEach(function(key){ var m=key.match(/^(\w+)::id(\d+)$/); if(!m) return;
+    var x=DATA.rows.find(function(r){ return r.id===+m[2]; }); LEAK_DISMISSED.delete(key); changed=true;
+    if(x) LEAK_DISMISSED.add(leakKeyFor(m[1],x)); });
+  if(changed) saveDismissed(); }
+function activeDismissed(){   // dismissed items that would otherwise be showing right now → [{fullKey,label,what}]
+  LEAK_SHOW_ALL=true; var all; try{ all=computeLeaks(); } finally{ LEAK_SHOW_ALL=false; }
+  var out=[], seen={};
+  all.forEach(function(L){ L.items.forEach(function(x){ if(x.__more||x.__orphanAll) return; var k=leakKeyFor(L.key,x);
+    if(LEAK_DISMISSED.has(k)&&!seen[k]){ seen[k]=1;
+      out.push({fullKey:k, what:L.label, label:x.__orphan?x.name:(x.inv?('Invoice #'+x.inv):(x.poReq||'item'))}); } }); });
+  return out; }
 function dismissLeak(fullKey){ LEAK_DISMISSED.add(fullKey); saveDismissed(); renderLeakGuard(); toast("Dismissed from Revenue-Leak Guard"); }
+function restoreLeak(fullKey){ LEAK_DISMISSED.delete(fullKey); saveDismissed(); renderLeakGuard(); toast("Restored"); }
 function restoreLeaks(){ LEAK_DISMISSED.clear(); saveDismissed(); renderLeakGuard(); toast("Restored dismissed items"); }
 var deskOpen={};
 function renderDesk(){
