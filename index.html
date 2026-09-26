@@ -617,8 +617,7 @@ const CONFIG = {
     "765":{ name:"Evolution Well Services Operating, LLC", label:"Evolution Well Services Operating LLC - 765", a1:"3 Hughes Landing", a2:"1780 Hughes Landing Blvd. Suite 125", a3:"The Woodlands, Texas 77380" }
   },
   NOA:{ name:"Momentum Capital Funding, LLC", l1:"PO Box 936049, Atlanta, GA 31193-6049", l2:"(205) 769-0604",
-        note:"This account has been assigned and must be paid to Momentum Capital Funding, LLC. Payment to any other party does not constitute payment of this invoice." },
-  AUTH:{ user:"admin", pass:"root" }   // fallback gate when GOOGLE_CLIENT_ID is not set
+        note:"This account has been assigned and must be paid to Momentum Capital Funding, LLC. Payment to any other party does not constitute payment of this invoice." }
 };
 
 const DIRECTORY = [
@@ -771,15 +770,25 @@ function paintCached(){
     demoOff(); renderAll(); return true;
   }catch(e){ return false; }
 }
+/* ============================ SESSION (server-verified sign-in, 2026-09-26) ============================
+   Google Sign-In gives an ID token; the backend verifies it and returns its own signed session (12 h).
+   Every request to the web app carries it. If the backend says auth is required, we clear it and show the gate. */
+var SESSION=(function(){ try{ var o=JSON.parse(localStorage.getItem("revo-sess")||"null"); return (o&&o.t&&o.exp>Date.now())?o:null; }catch(e){ return null; } })();
+function sessionOk(){ return !!(SESSION && SESSION.exp>Date.now()+60000); }
+function setSession(o){ SESSION=o; try{ if(o) localStorage.setItem("revo-sess",JSON.stringify(o)); else localStorage.removeItem("revo-sess"); }catch(e){} }
+function authFail(){ setSession(null); try{ localStorage.removeItem("revo-auth"); }catch(e){} var g=document.getElementById("gate"); if(g) g.classList.remove("hidden"); var er=document.getElementById("gateErr"); if(er) er.textContent="Your sign-in expired. Sign in again."; }
+function checkAuth(j){ if(j && j.auth){ authFail(); var er=new Error("auth"); er.auth=true; throw er; } return j; }
+function execGet(qs){ return fetch(CONFIG.EXEC_URL+"?"+qs+(SESSION?"&s="+encodeURIComponent(SESSION.t):"")).then(function(r){return r.json();}).then(checkAuth); }
 async function loadData(manual){
   if(_loading) return;                                   // a load is already in flight
   if(_retryT){ clearTimeout(_retryT); _retryT=null; }
+  if(CONFIG.EXEC_URL && !sessionOk()){ paintCached(); setStatus("is-warn","Sign in to load live data"); return; }
   if(CONFIG.EXEC_URL){
     _loading=true;
     if(!DATA.rows.length && paintCached()){ /* painted last copy — live data replaces it below */ }
     else setStatus(_failN?"is-warn":"is-wait", _failN?"Reconnecting…":"Connecting…");
     try{
-      var j=await fetch(CONFIG.EXEC_URL+"?action=summary"+(manual?"&fresh=1":"")).then(function(r){return r.json();});   // manual Refresh skips the server cache
+      var j=await execGet("action=summary"+(manual?"&fresh=1":""));   // manual Refresh skips the server cache
       if(j&&j.rows){ ingestRows(j.rows);
         try{ localStorage.setItem("revo-sum", JSON.stringify({t:Date.now(), rows:j.rows})); }catch(e){}   // #4: keep a copy for an instant next open
         LIVE=true; _failN=0; setStatus("is-live","Live · sheet"); demoOff(); renderAll(); _loading=false;   // paint the sheet immediately — don't block the dashboard on the config fetches
@@ -787,6 +796,7 @@ async function loadData(manual){
         if(manual) toast("Refreshed from the live sheet"); return; }
       throw 0;
     }catch(e){
+      if(e&&e.auth){ _loading=false; setStatus("is-warn","Sign in to load live data"); return; }   // don't retry-loop on a dead session
       LIVE=false; _failN++; _loading=false; demoOff();
       setStatus("is-warn","Can’t reach sheet · retrying…");   // hourglass keeps turning; no demo data
       if(!DATA.rows.length) renderAll();                       // first load with nothing yet → show clean empty state
@@ -799,7 +809,7 @@ async function loadData(manual){
 }
 async function loadLiveConfig(){
   var base=CONFIG.EXEC_URL;
-  var gj=function(a){ return fetch(base+"?action="+a).then(function(r){return r.json();}).catch(function(){return null;}); };
+  var gj=function(a){ return execGet("action="+a).catch(function(){return null;}); };
   try{ var cached=JSON.parse(localStorage.getItem("revo-boot")||"null"); if(cached) applyConfig(cached); }catch(e){}   // last known config → instant
   var b=await gj("bootstrap");                                                       // #3: one call for all four
   if(!(b && ("schedule" in b || "directory" in b))){                                // older backend → fall back to 4 calls
@@ -1563,7 +1573,7 @@ function findPoDup(v){   // an OPEN (not invoiced, not paid) PO Request with the
   return DATA.rows.find(function(x){ return x.poReq && !x.inv && !isPaid(x) && String(x.poReq).trim().toLowerCase()!==me && poDupKey(x)===k; });
 }
 function loadOrphans(fresh){ if(!CONFIG.EXEC_URL) return;
-  fetch(CONFIG.EXEC_URL+"?action=orphanpdfs"+(fresh?"&fresh=1":"")+"&t="+Date.now()).then(function(r){return r.json();})
+  execGet("action=orphanpdfs"+(fresh?"&fresh=1":"")+"&t="+Date.now())
     .then(function(j){ if(j&&j.porHigh) setPorHigh(j.porHigh);
       if(j&&Array.isArray(j.files)){ ORPHANS=j.files.filter(function(o){ return isPlainPor(o.name); }); try{ renderLeakGuard(); }catch(e){} } }).catch(function(){}); }
 /* Only the plain EWS-POR-###### series counts. The OP-/ES- blanket requests (EWS-POR-OP-00014, EWS-POR-ES-9001) are
@@ -1826,13 +1836,14 @@ function collect(v){ var b=B[v],s=state[v],c=contactByName(s.contact)||{}; retur
 async function verifyOnSheet(inv,poReq){
   for(var i=0;i<3;i++){
     await new Promise(function(r){setTimeout(r,i?5000:3000);});
-    try{ var j=await fetch(CONFIG.EXEC_URL+"?action=summary&t="+Date.now()).then(function(r){return r.json();});
+    try{ var j=await execGet("action=summary&t="+Date.now());
       var hit=((j&&j.rows)||[]).some(function(r){ return (inv&&String(r.inv||"").trim()===String(inv).trim()) || (!inv&&poReq&&String(r.poReq||"").trim()===String(poReq).trim()); });
       if(hit) return true; }catch(e){}
   }
   return false;
 }
-async function postToSheet(body){ return fetch(CONFIG.EXEC_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)}).then(function(r){return r.json();}); }
+async function postToSheet(body){ body=Object.assign({},body,{session:SESSION?SESSION.t:""});
+  return fetch(CONFIG.EXEC_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(checkAuth); }
 
 /* PO Request memory — persist the full builder record so Pull can restore Start/End/Notes/Contact/Fleet + line items (this browser). */
 function recKey(k){ return "revo-rec:"+String(k||"").trim().toLowerCase(); }
@@ -2166,7 +2177,7 @@ function setUser(email,name){ var el=document.getElementById("whoami"); if(el) e
 function recordLogin(email,name){
   if(!email) return;
   try{ if(sessionStorage.getItem("revo-logged")==="1") return; sessionStorage.setItem("revo-logged","1"); }catch(e){}
-  if(CONFIG.EXEC_URL){ try{ postToSheet({action:"logLogin",payload:{email:email,name:name||"",browser:navigator.userAgent||""}}).catch(function(){}); }catch(e){} }
+  /* logged server-side at sign-in (backend 'login' action) — nothing to post here */
 }
 function shortUA(ua){ ua=String(ua||"");
   var br=/edg/i.test(ua)?"Edge":/opr|opera/i.test(ua)?"Opera":/chrome|crios/i.test(ua)?"Chrome":/firefox|fxios/i.test(ua)?"Firefox":/safari/i.test(ua)?"Safari":"Browser";
@@ -2177,7 +2188,7 @@ async function openAccessLog(){
   mo.classList.add("open"); body.innerHTML='<div class="sub" style="padding:10px">Loading sign-in history…</div>';
   if(!CONFIG.EXEC_URL){ body.innerHTML='<div class="sub" style="padding:10px">The live sheet isn’t connected, so there’s no sign-in history to show.</div>'; return; }
   try{
-    var j=await fetch(CONFIG.EXEC_URL+"?action=logins").then(function(r){return r.json();});
+    var j=await execGet("action=logins");
     var rows=(j&&j.logins)||[];
     if(!rows.length){ body.innerHTML='<div class="sub" style="padding:10px">No sign-ins recorded yet. Logging begins once the updated web app is deployed — after that, every sign-in appears here.</div>'; return; }
     var trs=rows.map(function(x){ return '<tr><td class="mono">'+esc(x.ts)+'</td><td>'+esc(x.email)+'</td><td>'+(esc(x.name)||"—")+'</td><td class="sub" style="font-size:11px">'+esc(shortUA(x.browser))+'</td></tr>'; }).join("");
@@ -2189,34 +2200,40 @@ function closeAccessLog(){ var mo=document.getElementById("logModal"); if(mo) mo
 function gateInit(){
   var g=document.getElementById("gate");
   document.getElementById("signoutBtn").style.display="inline-flex";
-  var authed=false; try{ authed=localStorage.getItem("revo-auth")==="1"; }catch(e){}
+  var authed=sessionOk();
   try{ var u=localStorage.getItem("revo-user"); if(u){ AUTH_EMAIL=u; setUser(u,u.split("@")[0]); } }catch(e){}
   if(CONFIG.GOOGLE_CLIENT_ID){
     document.getElementById("pwForm").style.display="none";
     // required login: only a valid @domain Google session counts (ignore any stale admin/root auth)
     if(!(AUTH_EMAIL && AUTH_EMAIL.toLowerCase().endsWith("@"+String(CONFIG.ALLOWED_DOMAIN||"").toLowerCase()))) authed=false;
+    if(authed && SESSION.email) AUTH_EMAIL=SESSION.email;
     var render=function(){ if(!(window.google&&google.accounts&&google.accounts.id)){ setTimeout(render,300); return; }
       google.accounts.id.initialize({ client_id:CONFIG.GOOGLE_CLIENT_ID, callback:onGoogleCred, hd:CONFIG.ALLOWED_DOMAIN||undefined });
       google.accounts.id.renderButton(document.getElementById("gsiBtn"),{theme:"filled_black",size:"large",text:"signin_with",shape:"pill"}); };
     render();
   }
-  if(authed){ g.classList.add("hidden"); if(AUTH_EMAIL) recordLogin(AUTH_EMAIL, AUTH_EMAIL.split("@")[0]); } else { g.classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID) setTimeout(function(){var u=document.getElementById("gUser"); if(u)u.focus();},60); }
+  if(authed){ g.classList.add("hidden"); } else { g.classList.remove("hidden"); }
 }
-function onGoogleCred(resp){
+async function onGoogleCred(resp){
+  var err=document.getElementById("gateErr");
   try{ var p=JSON.parse(decodeURIComponent(atob(resp.credential.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")).split("").map(function(c){return "%"+("00"+c.charCodeAt(0).toString(16)).slice(-2);}).join("")));
-    if(CONFIG.ALLOWED_DOMAIN && !(String(p.email||"").toLowerCase().endsWith("@"+CONFIG.ALLOWED_DOMAIN.toLowerCase()))){ document.getElementById("gateErr").textContent="Use your @"+CONFIG.ALLOWED_DOMAIN+" account."; return; }
-    AUTH_EMAIL=p.email||"";
-    try{ localStorage.setItem("revo-auth","1"); localStorage.setItem("revo-user",p.email||""); }catch(e){}
-    setUser(p.email,p.name); recordLogin(p.email,p.name); document.getElementById("gate").classList.add("hidden");
-  }catch(e){ document.getElementById("gateErr").textContent="Sign-in failed, try again."; }
+    if(CONFIG.ALLOWED_DOMAIN && !(String(p.email||"").toLowerCase().endsWith("@"+CONFIG.ALLOWED_DOMAIN.toLowerCase()))){ err.textContent="Use your @"+CONFIG.ALLOWED_DOMAIN+" account."; return; }
+    err.textContent="Verifying…";
+    var r=await fetch(CONFIG.EXEC_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"login",idToken:resp.credential,payload:{browser:navigator.userAgent||""}})}).then(function(x){return x.json();});
+    if(!(r&&r.ok&&r.session)){ err.textContent=(r&&r.error)||"Sign-in could not be verified."; return; }
+    setSession({t:r.session,email:r.email,exp:r.exp}); err.textContent="";
+    AUTH_EMAIL=r.email||p.email||"";
+    try{ localStorage.setItem("revo-auth","1"); localStorage.setItem("revo-user",AUTH_EMAIL); }catch(e){}
+    setUser(AUTH_EMAIL,p.name); document.getElementById("gate").classList.add("hidden");
+    loadData(true);
+  }catch(e){ err.textContent="Sign-in failed, try again."; }
 }
 function gateSubmit(e){ e.preventDefault();
   var u=document.getElementById("gUser").value.trim(), p=document.getElementById("gPass").value;
-  if(u===CONFIG.AUTH.user && p===CONFIG.AUTH.pass){ try{ localStorage.setItem("revo-auth","1"); }catch(e){} document.getElementById("gate").classList.add("hidden"); document.getElementById("gateErr").textContent=""; }
-  else { var c=document.getElementById("gateForm"); c.classList.remove("gate-shake"); void c.offsetWidth; c.classList.add("gate-shake"); document.getElementById("gateErr").textContent="Incorrect username or password."; document.getElementById("gPass").value=""; }
+  { /* password fallback removed 2026-09-26 — Google Sign-In only */ var c=document.getElementById("gateForm"); c.classList.remove("gate-shake"); void c.offsetWidth; c.classList.add("gate-shake"); document.getElementById("gateErr").textContent="Incorrect username or password."; document.getElementById("gPass").value=""; }
   return false;
 }
-function signOut(){ try{ localStorage.removeItem("revo-auth"); localStorage.removeItem("revo-user"); sessionStorage.removeItem("revo-logged"); }catch(e){} GAPI.token=null; AUTH_EMAIL=""; setUser("",""); document.getElementById("gate").classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID){ document.getElementById("gUser").value=""; document.getElementById("gPass").value=""; } }
+function signOut(){ setSession(null); try{ localStorage.removeItem("revo-sum"); localStorage.removeItem("revo-auth"); localStorage.removeItem("revo-user"); sessionStorage.removeItem("revo-logged"); }catch(e){} GAPI.token=null; AUTH_EMAIL=""; setUser("",""); document.getElementById("gate").classList.remove("hidden"); if(!CONFIG.GOOGLE_CLIENT_ID){ document.getElementById("gUser").value=""; document.getElementById("gPass").value=""; } }
 
 /* Gmail API: obtain a compose token on demand, then create a draft with the PDF attached. */
 function gmailToken(){ return new Promise(function(res,rej){

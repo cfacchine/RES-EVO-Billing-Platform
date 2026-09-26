@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.25-7 · built 2026-09-25 12:42 EDT · Inbox/renamer name files from the newest row sharing a PO Request # ==== */
+/* ==== VERSION 2026.09.26-1 · built 2026-09-26 18:00 EDT · Server-side sign-in (session tokens) + write lock enforced ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.25-7', CODE_BUILT='2026-09-25 12:42 EDT';
+var CODE_VERSION='2026.09.26-1', CODE_BUILT='2026-09-26 18:00 EDT';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -92,8 +92,64 @@ var A = {
   draft:['draft']                                                  // ☆ dashboard star: invoice pre-built as a draft (no PO yet)
 };
 
+/* ============================ AUTH (2026-09-26) ============================
+   The page (index.html) is public, so it can hold no secret. Instead:
+     1. The user signs in with Google on the page and gets a Google ID token.
+     2. The page POSTs {action:'login', idToken} here. We verify it with Google (audience = our client ID,
+        verified @revolution-es.com email, not expired) and hand back our OWN session token, HMAC-signed with a
+        secret that lives only in Script Properties. Sessions last SESSION_HOURS.
+     3. Every other GET (&s=<session>) and POST ({session}) must carry a valid session.
+   Open without a session: GET version, GET pending (read-only feed for the Fleet Tracker), POST login.
+   Script Property AUTH_MODE: 'on' = enforce. Anything else = allow but log (rollout switch so the old page keeps
+   working until the new index.html is live). Set it with Run ▸ authOn / authOff. */
+var AUTH_CLIENT_ID='356147624842-1m9p45pem87hcea3tcfb1e7t5gn8e2d8.apps.googleusercontent.com';
+var AUTH_DOMAIN='revolution-es.com';
+var SESSION_HOURS=12;
+var OPEN_GET={version:1, pending:1};
+function authOn(){ PropertiesService.getScriptProperties().setProperty('AUTH_MODE','on'); return 'AUTH_MODE=on'; }
+function authOff(){ PropertiesService.getScriptProperties().setProperty('AUTH_MODE','off'); return 'AUTH_MODE=off'; }
+function authEnforced_(){ return PropertiesService.getScriptProperties().getProperty('AUTH_MODE')==='on'; }
+function sessionSecret_(){
+  var pr=PropertiesService.getScriptProperties(), k=pr.getProperty('SESSION_SECRET');
+  if(!k){ k=Utilities.getUuid()+Utilities.getUuid(); pr.setProperty('SESSION_SECRET',k); }
+  return k;
+}
+function b64u_(bytesOrStr){ return Utilities.base64EncodeWebSafe(bytesOrStr).replace(/=+$/,''); }
+function sign_(str){ return b64u_(Utilities.computeHmacSha256Signature(str, sessionSecret_())); }
+function makeSession_(email){
+  var exp=Date.now()+SESSION_HOURS*3600*1000, body=b64u_(JSON.stringify({e:email,x:exp}));
+  return {session:body+'.'+sign_(body), email:email, exp:exp};
+}
+function readSession_(tok){
+  tok=String(tok||''); var i=tok.indexOf('.'); if(i<1) return null;
+  var body=tok.slice(0,i), sig=tok.slice(i+1); if(sign_(body)!==sig) return null;
+  try{ var pad=body+'==='.slice((body.length+3)%4);
+    var o=JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(pad)).getDataAsString()); }catch(e){ return null; }
+  if(!o||!o.e||!(o.x>Date.now())) return null;
+  return {email:o.e, exp:o.x};
+}
+function verifyGoogleIdToken_(idt){
+  if(!idt) return null;
+  var r=UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token='+encodeURIComponent(idt),{muteHttpExceptions:true});
+  if(r.getResponseCode()!==200) return null;
+  var t=JSON.parse(r.getContentText()), email=String(t.email||'').toLowerCase();
+  if(t.aud!==AUTH_CLIENT_ID) return null;
+  if(t.iss!=='accounts.google.com' && t.iss!=='https://accounts.google.com') return null;
+  if(String(t.email_verified)!=='true') return null;
+  if(!email.endsWith('@'+AUTH_DOMAIN)) return null;
+  if(!(Number(t.exp)*1000>Date.now())) return null;
+  return {email:email, name:String(t.name||'')};
+}
+/* Returns null if allowed, or a JSON response to send back if not. */
+function authGate_(tok, what){
+  if(readSession_(tok)) return null;
+  if(!authEnforced_()){ console.warn('AUTH (not enforced): unauthenticated '+what); return null; }
+  return json_({ok:false, auth:'required', error:'Sign in required'});
+}
+
 function doGet(e){
   var a=(e&&e.parameter&&e.parameter.action)||'summary';
+  if(!OPEN_GET[a]){ var deny=authGate_(e&&e.parameter&&e.parameter.s, 'GET '+a); if(deny) return deny; }
   if(a==='version')   return json_({version:CODE_VERSION, built:CODE_BUILT});
   if(a==='schedule')  return json_(getSchedule_());
   if(a==='directory') return json_(getDirectory_());
@@ -171,7 +227,16 @@ function setPipeOrder_(p){
 }
 function doPost(e){
   var T0=Date.now(), TM={};                                                    // per-step timings → "_ms" in the reply
-  try{ var body=JSON.parse(e.postData.contents); var lock=LockService.getScriptLock(); lock.tryLock(20000); TM.lock=Date.now()-T0;
+  try{ var body=JSON.parse(e.postData.contents);
+    if(body.action==='login'){                                                   // open: trade a Google ID token for a session
+      var who=verifyGoogleIdToken_(body.idToken);
+      if(!who) return json_({ok:false, auth:'rejected', error:'Google sign-in could not be verified for @'+AUTH_DOMAIN});
+      try{ logLogin_({email:who.email, name:who.name, browser:(body.payload&&body.payload.browser)||''}); }catch(le){}
+      var ses=makeSession_(who.email); return json_({ok:true, session:ses.session, email:ses.email, exp:ses.exp}); }
+    var deny=authGate_(body.session, 'POST '+body.action); if(deny) return deny;
+    var lock=LockService.getScriptLock();
+    if(!lock.tryLock(20000)) return json_({ok:false, busy:true, error:'Another save is in progress. Nothing was written. Try again.'});
+    TM.lock=Date.now()-T0;
     try{ if(body.action==='logLogin') return json_({ok:true,row:logLogin_(body.payload||{})});
          if(body.action==='po'||body.action==='invoice'||body.action==='save'){
            var pl=body.payload||{};
