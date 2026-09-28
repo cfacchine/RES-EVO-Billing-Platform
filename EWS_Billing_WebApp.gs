@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.26-2 · built 2026-09-27 · Sign-in ENFORCED (bypass: Run authOff) ==== */
+/* ==== VERSION 2026.09.27-1 · built 2026-09-27 · Removed one-time migration code (relabel, flatten, optimize, due-date repair) ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.26-2', CODE_BUILT='2026-09-27';
+var CODE_VERSION='2026.09.27-1', CODE_BUILT='2026-09-27';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -158,8 +158,6 @@ function doGet(e){
   if(a==='emails')    return json_(getEmails_());
   if(a==='inspect')   return json_(inspect_());
   if(a==='sheetstats') return json_(sheetStats_());
-  if(a==='optimizePreview') return json_(optimizeTracker_(true));          // read-only dry run of #9
-  if(a==='verifyOptimize') return json_(verifyOptimize_());                  // read-only: compare G/Q/S to the pre-optimize backup                          // read-only workbook weight report (#9)
   if(a==='logins')    return json_(getLogins_(e));
   if(a==='bootstrap') return cachedJson_('boot', getBootstrap_, e);
   if(a==='orphanpdfs') return cachedJson_('orph', orphanPdfs_, e);      // PO Request PDFs in Drive whose number isn't on the sheet (Leak Guard)
@@ -318,33 +316,6 @@ function mapCols_(m){
 }
 function unitText_(u,inv){ var s=String(u||''); if(/765/.test(s)) return '765'; if(/755/.test(s)) return '755';
   var iv=String(inv||'').trim(); if(iv.charAt(0)==='5'&&iv.charAt(1)==='1') return '755'; if(iv.charAt(0)==='5'&&iv.charAt(1)==='0') return '765'; return '755'; }
-
-/* ONE-TIME: relabel the Billing Unit column to "OPERATING 765" / "SERVICE 755".
-   Safe & idempotent — only touches data rows where the unit is determinable, keeps the 765/755
-   number (so every read still resolves correctly), and can be undone via File → Version history.
-   Run it once from the Apps Script editor (Run ▸ relabelBillingUnit) after deploying this version. */
-function relabelBillingUnit(){
-  var ss=SpreadsheetApp.openById(BOOK_ID), changed=0, scanned=0;
-  TRK_TABS.forEach(function(name){
-    var sh=ss.getSheetByName(name); if(!sh||sh.getLastRow()<2) return;
-    var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
-    var hr=trackerHeaderRow_(vals); if(hr<0) return; var m=hdr_(vals[hr]);
-    var ui=col_(m,A.unit), ii=col_(m,A.inv), ai=col_(m,A.amount), pri=col_(m,A.poReq);
-    if(ui<0) return;
-    for(var r=hr+1;r<vals.length;r++){
-      var row=vals[r], inv=String(g_(row,ii)||'').trim(), amt=g_(row,ai), poReq=String(g_(row,pri)||'');
-      if(!inv && !amt && !poReq) continue;                       // skip blank rows
-      scanned++;
-      var cur=String(row[ui]||'');
-      var num = /765/.test(cur)?'765' : (/755/.test(cur)?'755' : null);
-      if(!num){ if(inv.charAt(0)==='5'&&inv.charAt(1)==='1') num='755'; else if(inv.charAt(0)==='5'&&inv.charAt(1)==='0') num='765'; }
-      if(!num) continue;                                         // can't determine — leave as-is
-      var label = (num==='765')?'765 · Operations':'755 · Equipment';
-      if(cur!==label){ sh.getRange(r+1, ui+1).setValue(label); changed++; }
-    }
-  });
-  return 'Relabeled '+changed+' of '+scanned+' Billing Unit cell(s).';
-}
 
 /* ============================ INSPECT (verification) ============================ */
 /* Read-only: size + formula weight of every tab, so we can see what the workbook recalculates on each save. */
@@ -513,31 +484,6 @@ function stageFolder_(action){
 function billingFolder_(root,p,action){
   var uf=unitFolder_(p.unit); if(!uf) return root;                       // unit unknown → EWS Billing root
   return folderChild_(folderChild_(root,uf),stageFolder_(action));       // EWS Billing / <unit> / <stage>
-}
-/* ONE-TIME (2026-09-23): remove the Year level. Moves everything under EWS Billing/<Year>/… up one level,
-   merging into EWS Billing/<unit>/<stage> when those folders already exist, then trashes the emptied Year
-   folder. Nothing is deleted except empty folders; name clashes are kept (both files) and reported.
-   Run ▸ flattenYearFoldersPreview first (changes nothing), then Run ▸ flattenYearFolders, then linkDriveFiles. */
-function flattenYearFoldersPreview(){ var r=flattenYears_(true); Logger.log(r); return r; }
-function flattenYearFolders(){ var r=flattenYears_(false); Logger.log(r); return r; }
-function flattenYears_(preview){
-  var root=DriveApp.getFolderById(DRIVE_ROOT), log=[], moved=0, clashes=[];
-  function mergeInto(src,dst,path){
-    var fs=src.getFiles();
-    while(fs.hasNext()){ var f=fs.next(), nm=f.getName();
-      if(dst.getFilesByName(nm).hasNext()) clashes.push(path+'/'+nm);
-      if(!preview) f.moveTo(dst); moved++; }
-    var ds=src.getFolders();
-    while(ds.hasNext()){ var sub=ds.next(), it=dst.getFoldersByName(sub.getName());
-      if(it.hasNext()) mergeInto(sub,it.next(),path+'/'+sub.getName());
-      else { log.push((preview?'would move ':'moved ')+path+'/'+sub.getName()+'/ → EWS Billing'+path.replace(/^\/\d{4}/,'')+'/'); if(!preview) sub.moveTo(dst); } }
-    if(!preview && !src.getFiles().hasNext() && !src.getFolders().hasNext() && src.getId()!==DRIVE_ROOT) src.setTrashed(true);
-  }
-  var years=root.getFolders();
-  while(years.hasNext()){ var y=years.next(); if(!/^\d{4}$/.test(y.getName())) continue;
-    log.push((preview?'WOULD flatten ':'Flattened ')+'EWS Billing/'+y.getName()+'/'); mergeInto(y,root,'/'+y.getName()); }
-  if(!preview) bustCache_();
-  return log.join('\n')+'\nFiles '+(preview?'to move: ':'moved: ')+moved+(clashes.length?'\nSame-name files now side by side (check):\n • '+clashes.join('\n • '):'');
 }
 function savePdf_(p,action){
   if(!p.pdfB64) return '';
@@ -789,7 +735,6 @@ RowPatch_.prototype.flush=function(){
   var self=this;
   runs.forEach(function(r){ self.sh.getRange(self.row,r[0]+1,1,r.length).setValues([r.map(function(c){return self.p[c];})]); });
 };
-function setCell_(sh,row,m,names,val){ var i=col_(m,names); if(i>=0 && val!==''&&val!=null) sh.getRange(row,i+1).setValue(val); }
 /* ---- Duplicate PO Request guard (2026.09.25-2) ----------------------------------------------------------
    Stops a second row for the same job: 2026-09-24 a stale builder re-Generated EWS-POR-000028/29 as 000036/37.
    Refuses a NEW PO Request row when (a) its PO Request # is already on the Billing Tracker, or (b) an open row
@@ -897,7 +842,6 @@ function getLogins_(e){
   out.reverse();   // newest first
   return {logins:out};
 }
-function parseLines_(v){ var s=String(v||'').trim(); if(!s||s.charAt(0)!=='[') return []; try{ var a=JSON.parse(s); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
 /* Parse the Line Items cell — supports the old plain array AND the new {start,end,notes,lines} pack. */
 function parsePack_(v){ var s=String(v||'').trim(); if(!s) return {lines:[]};
   try{ var o=JSON.parse(s);
@@ -1209,135 +1153,6 @@ function eachPdf_(folder,cb){
   var subs=folder.getFolders();                                                    // recurse Year → unit → stage → any depth,
   while(subs.hasNext()){ var sf=subs.next(), sn=String(sf.getName());
     if(sn.charAt(0)!=='_' && sn!==DRIVE_INBOX) eachPdf_(sf,cb); }                 // skipping _Trash / _Needs Review / 0 · Inbox (not filed yet)
-}
-
-/* ============================ #9 WORKBOOK OPTIMIZE (one-time, 2026-09-23) ============================
-   1) Backs up the whole workbook (Drive copy) before touching anything.
-   2) Billing Tracker: replaces the per-row formulas in Days Outstanding / Due Date / Aging Bucket with ONE
-      ARRAYFORMULA in each header cell — only when every row has the same formula and it's array-safe.
-      Afterwards it recomputes and compares every value to the old per-row results; any mismatch → that
-      column is automatically put back exactly as it was.
-   3) Deletes the unused "Billing Tracker (Clean)" tab — only if no formula anywhere refers to it.
-   Run ▸ optimizeTrackerPreview first (changes nothing), then Run ▸ optimizeTracker. */
-var OPT_COLS = [['days outstanding'],['due date'],['aging bucket']];
-var OPT_DROP_TAB = 'Billing Tracker (Clean)';
-var OPT_SAFE_FN = ['IF','IFS','IFERROR','IFNA','REGEXMATCH','REGEXEXTRACT','REGEXREPLACE','TODAY','VALUE','N','TEXT','DATEVALUE',
-                   'ROUND','ROUNDUP','ROUNDDOWN','INT','ABS','LEN','TRIM','UPPER','LOWER','ISBLANK','ISNUMBER','ISTEXT','ISERROR','ARRAYFORMULA'];
-function optimizeTrackerPreview(){ var r=optimizeTracker_(true); Logger.log(JSON.stringify(r,null,2)); return r; }
-function optimizeTracker(){ var r=optimizeTracker_(false); Logger.log(JSON.stringify(r,null,2)); return r; }
-function optArrayify_(f,colIdx1,firstRow){
-  // f is an R1C1 formula like =IF(RC1="","",TODAY()-RC1). Every same-row ref becomes an A1 open range (A2:A).
-  var body=f.replace(/^=/,''), parts=body.split(/("(?:[^"]|"")*")/), bad=null;
-  for(var i=0;i<parts.length;i+=2){                                          // even parts are outside string literals
-    var seg=parts[i];
-    if(/!/.test(seg)) { bad='references another tab'; break; }
-    (seg.match(/\b([A-Z][A-Z0-9\.]*)\s*\(/g)||[]).forEach(function(fn){ fn=fn.replace(/\s*\($/,''); if(OPT_SAFE_FN.indexOf(fn)<0) bad=bad||('uses '+fn+'() which is not array-safe'); });
-    parts[i]=seg.replace(/(^|[^A-Za-z0-9_])R(\[-?\d+\]|\d+)?C(\[-?\d+\]|\d+)?(?![A-Za-z0-9_\[])/g,function(m,pre,r,c){
-      if(r && r!=='[0]') { bad=bad||'refers to a different row'; return m; }
-      var col = !c ? colIdx1 : (c.charAt(0)==='[' ? colIdx1+Number(c.slice(1,-1)) : Number(c));
-      var L=colLetter_(col-1); return pre+L+firstRow+':'+L;                    // same-row ref → open column range (A1)
-    });
-  }
-  return bad ? {ok:false, why:bad} : {ok:true, body:parts.join('')};
-}
-function optimizeTracker_(preview){
-  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB), out={preview:!!preview, columns:[], dropTab:null};
-  var h=hdrInfo_(sh); if(!h) return {error:'Billing Tracker header row not found'};
-  var first=h.hr+2, maxR=sh.getMaxRows(), n=maxR-first+1;
-  if(!preview){ out.backup=DriveApp.getFileById(BOOK_ID).makeCopy('EWS Billing Tracker — backup before optimize '+Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'yyyy-MM-dd HH:mm')).getUrl(); }
-  OPT_COLS.forEach(function(names){
-    var ci=col_(h.m,names), rep={column:names[0]};
-    if(ci<0){ rep.skip='column not found'; out.columns.push(rep); return; }
-    var hdrCell=sh.getRange(h.hr+1,ci+1); rep.cell=colLetter_(ci)+(h.hr+1);
-    if(/ARRAYFORMULA/i.test(hdrCell.getFormula())){ rep.skip='already an array formula'; out.columns.push(rep); return; }
-    var rg=sh.getRange(first,ci+1,n,1), fR1=rg.getFormulasR1C1().map(function(r){return r[0];}), vals=rg.getValues().map(function(r){return r[0];});
-    var distinct={}, consts=0, rowsWithF=0;
-    fR1.forEach(function(f,i){ if(f){ distinct[f]=(distinct[f]||0)+1; rowsWithF++; } else if(String(vals[i])!=='') consts++; });
-    var keys=Object.keys(distinct); rep.rowsWithFormula=rowsWithF; rep.distinctFormulas=keys.length; rep.typedValues=consts;
-    if(keys.length!==1){ rep.skip=keys.length?'rows use different formulas':'no formulas'; rep.samples=keys.slice(0,3); out.columns.push(rep); return; }
-    if(consts>0){ rep.skip=consts+' row(s) have typed values instead of the formula — left alone so nothing is overwritten'; out.columns.push(rep); return; }
-    var conv=optArrayify_(keys[0],ci+1,first);
-    rep.oldFormulaR1C1=keys[0];
-    if(!conv.ok){ rep.skip=conv.why; out.columns.push(rep); return; }
-    var hdrText=String(hdrCell.getValue()), header=hdrText.replace(/"/g,'""');
-    rep.newFormula='={"'+header+'";ARRAYFORMULA('+conv.body+')}';
-    if(preview){ rep.action='would convert'; out.columns.push(rep); return; }
-    // apply → verify → auto-revert on any mismatch
-    var before=rg.getDisplayValues().map(function(r){return r[0];});
-    rg.clearContent(); hdrCell.setFormula(rep.newFormula); SpreadsheetApp.flush();
-    var after=rg.getDisplayValues().map(function(r){return r[0];}), bad=0, badRows=[];
-    for(var i=0;i<n;i++){ if(fR1[i] && before[i]!==after[i]){ bad++; if(badRows.length<5) badRows.push((first+i)+': '+before[i]+' → '+after[i]); } }
-    if(bad){ hdrCell.setValue(hdrText); rg.setFormulasR1C1(fR1.map(function(f){return [f];})); SpreadsheetApp.flush();   // exact restore
-      rep.action='REVERTED — '+bad+' value(s) differed'; rep.mismatches=badRows; }
-    else rep.action='converted — all '+rowsWithF+' values identical';
-    out.columns.push(rep);
-  });
-  // drop the unused copy tab, only if nothing points at it
-  var drop=ss.getSheetByName(OPT_DROP_TAB);
-  if(!drop) out.dropTab={tab:OPT_DROP_TAB, skip:'not found'};
-  else {
-    var refs=0; ss.getSheets().forEach(function(s2){ if(s2.getName()===OPT_DROP_TAB) return; var lr=s2.getLastRow(), lc=s2.getLastColumn(); if(lr<1||lc<1) return;
-      s2.getRange(1,1,lr,lc).getFormulas().forEach(function(r){ r.forEach(function(x){ if(x && x.indexOf(OPT_DROP_TAB)>=0) refs++; }); }); });
-    if(refs) out.dropTab={tab:OPT_DROP_TAB, skip:refs+' formula(s) refer to it — kept'};
-    else if(preview) out.dropTab={tab:OPT_DROP_TAB, action:'would delete (nothing refers to it)'};
-    else { ss.deleteSheet(drop); out.dropTab={tab:OPT_DROP_TAB, action:'deleted'}; }
-  }
-  if(!preview) bustCache_();
-  return out;
-}
-
-/* ---- #9 follow-up (2026-09-23): verify against the backup + repair Due Date (column Q) ---- */
-function optBackupSS_(){
-  var it=DriveApp.searchFiles('title contains "EWS Billing Tracker — backup before optimize" and trashed=false'), best=null;
-  while(it.hasNext()){ var f=it.next(); if(!best||f.getDateCreated()>best.getDateCreated()) best=f; }
-  return best ? {file:best, ss:SpreadsheetApp.openById(best.getId())} : null;
-}
-/* Read-only: compare Days Outstanding / Due Date / Aging Bucket, row by row, with the backup taken before optimizing. */
-function verifyOptimize_(){
-  var b=optBackupSS_(); if(!b) return {error:'backup not found'};
-  var cur=SpreadsheetApp.openById(BOOK_ID).getSheetByName(WRITE_TAB), old=b.ss.getSheetByName(WRITE_TAB);
-  var h=hdrInfo_(cur), first=h.hr+2, last=Math.max(old.getLastRow(),first), n=last-first+1, out={backup:b.file.getName(), rows:n, columns:[]};
-  OPT_COLS.forEach(function(names){
-    var ci=col_(h.m,names); if(ci<0) return;
-    var a=old.getRange(first,ci+1,n,1).getDisplayValues(), c=cur.getRange(first,ci+1,n,1).getDisplayValues(), f=cur.getRange(first,ci+1,Math.min(3,n),1).getFormulas();
-    var bad=[], cnt=0; for(var i=0;i<n;i++){ if(a[i][0]!==c[i][0]){ cnt++; if(bad.length<6) bad.push((first+i)+': was "'+a[i][0]+'" now "'+c[i][0]+'"'); } }
-    out.columns.push({column:names[0], header:cur.getRange(h.hr+1,ci+1).getFormula()||cur.getRange(h.hr+1,ci+1).getValue(), row2Formula:f[0][0], mismatches:cnt, samples:bad});
-  });
-  return out;
-}
-/* Put Due Date back to its original per-row formula on every data row (and clear the empty rows below), then verify. */
-function repairDueDate(){
-  var sh=SpreadsheetApp.openById(BOOK_ID).getSheetByName(WRITE_TAB), h=hdrInfo_(sh), ci=col_(h.m,['due date']);
-  var A=colLetter_(col_(h.m,A_.date)), P=colLetter_(col_(h.m,['payment terms'])), first=h.hr+2, maxR=sh.getMaxRows();
-  var lastData=first-1, keys=keyCol_(sh,h.hr,col_(h.m,A_.date)); for(var i=keys.length-1;i>=0;i--){ if(keys[i]!==''){ lastData=first+i; break; } }
-  var hdr=sh.getRange(h.hr+1,ci+1); if(/ARRAYFORMULA/i.test(hdr.getFormula())) hdr.setValue('Due Date');
-  sh.getRange(first,ci+1,maxR-first+1,1).clearContent();
-  var fs=[]; for(var r=first;r<=Math.max(lastData,first);r++) fs.push(['=IF($'+A+r+'="","",$'+A+r+'+IFERROR(VALUE(REGEXEXTRACT($'+P+r+'&"","\\d+")),60))']);
-  sh.getRange(first,ci+1,fs.length,1).setFormulas(fs);
-  SpreadsheetApp.flush(); bustCache_();
-  var v=verifyOptimize_(); Logger.log(JSON.stringify(v,null,2)); return v;
-}
-var A_ = { date:['invoice date','date','billing date'] };
-
-/* Due Date as ONE array formula (replaces whatever is in Q below the header), then checks every dated row
-   against the expected value (Invoice Date + the number in Payment Terms, default 60). 2026-09-23 */
-function fixDueDate(){
-  var sh=SpreadsheetApp.openById(BOOK_ID).getSheetByName(WRITE_TAB), h=hdrInfo_(sh);
-  var ci=col_(h.m,['due date']), ia=col_(h.m,['invoice date','date','billing date']), ip=col_(h.m,['payment terms','terms']);
-  if(ci<0||ia<0||ip<0) return 'columns not found';
-  var La=colLetter_(ia), Lp=colLetter_(ip), first=h.hr+2, maxR=sh.getMaxRows(), n=maxR-first+1;
-  var hdr=sh.getRange(h.hr+1,ci+1);
-  sh.getRange(first,ci+1,n,1).clearContent().setNumberFormat('m/d/yyyy');
-  hdr.setFormula('={"Due Date";ARRAYFORMULA(IF('+La+first+':'+La+'="","",TO_DATE('+La+first+':'+La+'+IFERROR(VALUE(REGEXEXTRACT('+Lp+first+':'+Lp+'&"","\\d+")),60))))}');
-  SpreadsheetApp.flush(); bustCache_();
-  var tz=sheetTz_(), A=sh.getRange(first,ia+1,n,1).getValues(), P=sh.getRange(first,ip+1,n,1).getValues(), Q=sh.getRange(first,ci+1,n,1).getValues();
-  var dated=0, ok=0, bad=[];
-  for(var i=0;i<n;i++){ var a=A[i][0]; if(!(a instanceof Date)) continue; dated++;
-    var m=String(P[i][0]||'').match(/\d+/), days=m?Number(m[0]):60, q=Q[i][0], ymd=Utilities.formatDate(a,tz,'yyyy-M-d').split('-').map(Number);
-    var exp=Utilities.formatDate(new Date(Date.UTC(ymd[0],ymd[1]-1,ymd[2]+days)),'UTC','yyyy-MM-dd');   // calendar-day math, DST-proof
-    if(q instanceof Date && Utilities.formatDate(q,tz,'yyyy-MM-dd')===exp) ok++;
-    else if(bad.length<8) bad.push((first+i)+': expected '+exp+' got '+q); }
-  var r={datedRows:dated, correct:ok, problems:bad}; Logger.log(JSON.stringify(r,null,2)); return r;
 }
 
 /*************************************************************************************************
