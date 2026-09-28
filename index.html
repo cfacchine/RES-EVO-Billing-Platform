@@ -839,7 +839,6 @@ function setStatus(state,text){
   if(el){ el.classList.remove("is-live","is-wait","is-warn"); el.classList.add(state); }
   var m=document.getElementById("dataMode"); if(m&&text!=null) m.textContent=text;
 }
-function setMode(t){ var m=document.getElementById("dataMode"); if(m) m.textContent=t; }   // legacy shim
 function demoOff(){ var b=document.getElementById("demoBanner"); if(b) b.style.display="none"; }
 
 /* ============================ FORMAT ============================ */
@@ -2192,11 +2191,6 @@ function isAdmin(email){ email=String(email||AUTH_EMAIL||"").trim().toLowerCase(
 function setUser(email,name){ var el=document.getElementById("whoami"); if(el) el.textContent=name||email||"";
   var lb=document.getElementById("logBtn"); if(lb) lb.style.display=isAdmin(email)?"":"none"; }
 /* Record a sign-in to the Access Log — once per browser session (a refresh won't spam it). */
-function recordLogin(email,name){
-  if(!email) return;
-  try{ if(sessionStorage.getItem("revo-logged")==="1") return; sessionStorage.setItem("revo-logged","1"); }catch(e){}
-  /* logged server-side at sign-in (backend 'login' action) — nothing to post here */
-}
 function shortUA(ua){ ua=String(ua||"");
   var br=/edg/i.test(ua)?"Edge":/opr|opera/i.test(ua)?"Opera":/chrome|crios/i.test(ua)?"Chrome":/firefox|fxios/i.test(ua)?"Firefox":/safari/i.test(ua)?"Safari":"Browser";
   var os=/windows/i.test(ua)?"Windows":/mac os|macintosh/i.test(ua)?"macOS":/android/i.test(ua)?"Android":/iphone|ipad|ios/i.test(ua)?"iOS":/linux/i.test(ua)?"Linux":"";
