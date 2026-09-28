@@ -1641,8 +1641,8 @@ function renderBuilder(v){
     +'<div class="f"><label>Invoice #</label><div style="display:flex;gap:6px;align-items:stretch"><input style="flex:1;min-width:0" type="text" value="'+esc(s.inv)+'" oninput="upd(\''+v+'\',\'inv\',this.value)" placeholder="'+(b.key==="755"?"e.g. 510078":"e.g. 500494")+'"><button class="btn sm" type="button" onclick="pullId(\''+v+'\',\'inv\')" title="Pull the invoice with this number">Pull ▸</button></div></div>'
     +'<div class="f"><label>Doc Date</label><input type="date" value="'+esc(s.date)+'" oninput="upd(\''+v+'\',\'date\',this.value)"></div></div></div>'
     +'<div class="form-sec"><h4>Line Items — Billing Schedule '+b.key+' <span class="rule"></span></h4>'
-    +'<table class="li-table"><colgroup><col class="c-item"><col class="c-qty">'+(b.key==="765"?'<col class="c-tech">':'')+'<col class="c-unit"><col class="c-rate"><col class="c-tot"><col class="c-del"></colgroup>'
-    +'<thead><tr><th>Schedule Item</th><th class="c">Qty</th>'+(b.key==="765"?'<th class="c">Techs</th>':'')+'<th class="c">Unit</th><th class="r">Rate</th><th class="r">Total</th><th></th></tr></thead>'
+    +'<table class="li-table"><colgroup><col class="c-item"><col class="c-qty">'+(hasTechCol(b.key)?'<col class="c-tech">':'')+'<col class="c-unit"><col class="c-rate"><col class="c-tot"><col class="c-del"></colgroup>'
+    +'<thead><tr><th>Schedule Item</th><th class="c">Qty</th>'+(hasTechCol(b.key)?'<th class="c">Techs</th>':'')+'<th class="c">Unit</th><th class="r">Rate</th><th class="r">Total</th><th></th></tr></thead>'
     +'<tbody id="li-'+v+'"></tbody></table>'
     +'<button class="addline" onclick="addLine(\''+v+'\')">＋ Add line item</button>'
     +'<div class="li-foot"><span class="lbl">Grand Total</span><span class="amt" id="gt-'+v+'">$0.00</span></div></div>'
@@ -1669,11 +1669,18 @@ function applyContact(v,name){ var s=state[v]; s.contact=name; var c=contactByNa
 function setMode2(v,m){ state[v].mode=m; renderBuilder(v); }
 function addLine(v,silent){ state[v].lines.push({idx:"",qty:1,techs:1,rate:0}); if(!silent) renderLines(v); }
 function delLine(v,i){ state[v].lines.splice(i,1); if(!state[v].lines.length) addLine(v,true); renderLines(v); }
-function isSupportingLabor(v,idx){ var it=idx!==""?RATES[B[v].key][+idx]:null; return it&&/supporting labor/i.test(it[RIDX.cat]); }
-function lineTotal(v,L){ var q=parseFloat(L.qty)||0, r=parseFloat(L.rate)||0, mult=1; if(B[v].key==="765"&&isSupportingLabor(v,L.idx)) mult=Math.max(parseInt(L.techs)||1,1); return q*r*mult; }
+/* Schedule categories billed per tech: the line total is Qty × Rate × Techs. Matched on the category name (case / dash / spacing insensitive), on either unit's schedule. */
+var TECH_CATS = ["Supporting Labor","Emergency - Supporting Labor","Equipment Operator","Support Equipment & Tools"];
+function catKey(c){ return String(c||"").toLowerCase().replace(/[\u2013\u2014\-]+/g," ").replace(/\band\b/g,"&").replace(/\s+/g," ").trim(); }
+var TECH_CAT_KEYS = TECH_CATS.map(catKey);
+function isTechCat(cat){ return TECH_CAT_KEYS.indexOf(catKey(cat))>=0; }
+function isSupportingLabor(v,idx){ var it=idx!==""?RATES[B[v].key][+idx]:null; return !!(it&&isTechCat(it[RIDX.cat])); }
+function hasTechCol(key){ return (RATES[key]||[]).some(function(it){ return isTechCat(it[RIDX.cat]); }); }
+function lineTotal(v,L){ var q=parseFloat(L.qty)||0, r=parseFloat(L.rate)||0, mult=1; if(isSupportingLabor(v,L.idx)) mult=Math.max(parseInt(L.techs)||1,1); return q*r*mult; }
 function lineChange(v,i,field,val){ var L=state[v].lines[i]; if(field==="idx"){ L.idx=val; var it=RATES[B[v].key][+val]; if(it) L.rate=(it[RIDX.rate]==null?0:it[RIDX.rate]); } else L[field]=val; renderLines(v); }
 function renderLines(v){
   var b=B[v], s=state[v], tb=document.getElementById("li-"+v); if(!tb) return;
+  var tbl=tb.closest("table"); if(tbl && hasTechCol(b.key)!==!!tbl.querySelector("col.c-tech")){ renderBuilder(v); return; }   // schedule loaded after the form drew: redraw so the Techs column matches
   var cats=[...new Set(RATES[b.key].map(function(it){return it[RIDX.cat];}))];
   tb.innerHTML=s.lines.map(function(L,i){
     var opts='<option value="">— pick item —</option>'+cats.map(function(cat){
@@ -1681,7 +1688,7 @@ function renderLines(v){
       return '<optgroup label="'+esc(cat)+'">'+items.map(function(p){return '<option value="'+p[1]+'" '+((""+L.idx)===(""+p[1])?"selected":"")+'>'+esc(p[0][RIDX.name])+(p[0][RIDX.rate]==null?" (rate varies)":"")+'</option>';}).join("")+'</optgroup>';
     }).join("");
     var it=L.idx!==""?RATES[b.key][+L.idx]:null, sup=isSupportingLabor(v,L.idx);
-    var techCell=b.key==="765"?'<td>'+(sup?'<input class="qc" type="text" inputmode="numeric" value="'+L.techs+'" oninput="lineChange(\''+v+'\','+i+',\'techs\',this.value)">':'<span class="u">–</span>')+'</td>':"";
+    var techCell=hasTechCol(b.key)?'<td>'+(sup?'<input class="qc" type="text" inputmode="numeric" value="'+L.techs+'" oninput="lineChange(\''+v+'\','+i+',\'techs\',this.value)">':'<span class="u">–</span>')+'</td>':"";
     return '<tr><td><select onchange="lineChange(\''+v+'\','+i+',\'idx\',this.value)">'+opts+'</select></td>'
       +'<td><input class="qc" type="text" inputmode="decimal" value="'+L.qty+'" oninput="lineChange(\''+v+'\','+i+',\'qty\',this.value)"></td>'
       +techCell+'<td class="u">'+esc(it?it[RIDX.uom]:"")+'</td>'
@@ -1695,7 +1702,7 @@ function renderLines(v){
 }
 function docLines(v){ var b=B[v]; return state[v].lines.filter(function(L){return L.idx!==""||lineTotal(v,L)>0;}).map(function(L){
   var it=L.idx!==""?RATES[b.key][+L.idx]:null, sup=isSupportingLabor(v,L.idx), techs=parseInt(L.techs)||1;
-  return { name:it?it[RIDX.name]:"—", cat:it?it[RIDX.cat]:"Other Items", unit:it?it[RIDX.uom]:"EA", qty:parseFloat(L.qty)||0, rate:parseFloat(L.rate)||0, techs:(b.key==="765"&&sup)?techs:0, total:lineTotal(v,L) }; }); }
+  return { name:it?it[RIDX.name]:"—", cat:it?it[RIDX.cat]:"Other Items", unit:it?it[RIDX.uom]:"EA", qty:parseFloat(L.qty)||0, rate:parseFloat(L.rate)||0, techs:sup?Math.max(techs,1):0, total:lineTotal(v,L) }; }); }
 function buildDoc(v){
   var b=B[v], s=state[v], isInv=s.mode==="INVOICE", bt=CONFIG.BILLTO[b.key], c=CONFIG.COMPANY;
   var lines=docLines(v), sub=lines.reduce(function(a,l){return a+l.total;},0);
