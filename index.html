@@ -620,20 +620,10 @@ const CONFIG = {
         note:"This account has been assigned and must be paid to Momentum Capital Funding, LLC. Payment to any other party does not constitute payment of this invoice." }
 };
 
-const DIRECTORY = [
-  { fleet:"1",  name:"Lindsay Riley",  email:"Lindsay.Riley@evolutionws.com", phone:"304.613.0180", operator:"EQT" },
-  { fleet:"6",  name:"Brandon Dock",   email:"Brandon.Dock@evolutionws.com",  phone:"570.713.5407", operator:"CNX" },
-  { fleet:"9",  name:"Eric Cronberg",  email:"Eric.Cronberg@evolutionws.com", phone:"303.507.3985", operator:"EOG" },
-  { fleet:"10", name:"Corey Miller",   email:"Corey.Miller@evolutionws.com",  phone:"346.459.4404", operator:"EQT" },
-  { fleet:"13", name:"Ryan Poorman",   email:"Ryan.Poorman@evolutionws.com",  phone:"832.610.4125", operator:"EQT" },
-  { fleet:"15", name:"Jeremy Bower",   email:"jeremy.bower@evolutionws.com",  phone:"570.772.9235", operator:"BHE/NNE" }
-];
-const EXTRA_CONTACTS = [
-  { name:"Nick Kelley", email:"nicholas.kelley@evolutionws.com", phone:"" },
-  { name:"Ben Sweeney", email:"ben.sweeney@evolutionws.com", phone:"" },
-  { name:"Dominico Chero", email:"Dchero@beusaenergy.com", phone:"" },
-  { name:"Ryan Adams", email:"radams@beusaenergy.com", phone:"" }
-];
+/* Contacts come from the sheet's Directory tab after sign-in (bootstrap → applyConfig), so no names, phones or
+   emails ship in this public page. Rows with a Fleet # fill DIRECTORY; rows with the Fleet # blank fill EXTRA_CONTACTS. */
+const DIRECTORY = [];
+const EXTRA_CONTACTS = [];
 /* Operator (Lists!A) + Disc (Lists!B) dropdown sources — defaults; refreshed live from the sheet's Lists tab */
 let OPERATORS = ["EQT","CNX","EOG","Encino","NNE","SB","BHE","Ascent","Evolution","Range","RES","Shop","Other"];
 let DISC = ["Rig Up","Rig Down","Equipment Service","Emergency","Roustabout","Misc","Service","Digital Asset Management"];
@@ -643,10 +633,7 @@ function contactForRow(x){ if(x&&x.contactEmail) return {name:x.contactName||x.o
 /* CC lists per document type — defaults below; replaced live from the "Email Lists" tab (?action=emails).
    To = the fleet contact (Fleet Directory). Edit recipients on the sheet's Email Lists tab. */
 var EMAIL_CC = {
-  poReq:       ["cfacchine@revolution-es.com","fwright@revolution-es.com","gkail@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","rmcclain@revolution-es.com","accountexecutive@mcf.fund","servicerequest@beusaenergy.com","jason.jacobs@beusaenergy.com","nicholas.kelley@evolutionws.com","ben.sweeney@evolutionws.com","Dchero@beusaenergy.com","radams@beusaenergy.com"],
-  invoice:     ["cfacchine@revolution-es.com","fwright@revolution-es.com","gkail@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","rmcclain@revolution-es.com","accountexecutive@mcf.fund","servicerequest@beusaenergy.com","jason.jacobs@beusaenergy.com","nicholas.kelley@evolutionws.com","ben.sweeney@evolutionws.com","Dchero@beusaenergy.com","radams@beusaenergy.com"],
-  reminder:    ["cfacchine@revolution-es.com","fwright@revolution-es.com","gkail@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","rmcclain@revolution-es.com","accountexecutive@mcf.fund","servicerequest@beusaenergy.com","jason.jacobs@beusaenergy.com","nicholas.kelley@evolutionws.com","ben.sweeney@evolutionws.com","Dchero@beusaenergy.com","radams@beusaenergy.com"],
-  collections: ["fwright@revolution-es.com","jkinder@revolution-es.com","mpuskarich@revolution-es.com","jason.jacobs@beusaenergy.com","servicerequest@beusaenergy.com","gkail@revolution-es.com","accountexecutive@mcf.fund","rmcclain@revolution-es.com","dchero@beusaenergy.com","cfacchine@revolution-es.com","radams@beusaenergy.com","jhutchins@revolution-es.com"]
+  poReq:[], invoice:[], reminder:[], collections:[]   // filled from the sheet's Email Lists tab after sign-in
 };
 
 const RATES = {
@@ -824,6 +811,7 @@ function applyConfig(b){
   try{ if(sc&&Array.isArray(sc['755'])&&sc['755'].length) RATES['755']=sc['755'];
        if(sc&&Array.isArray(sc['765'])&&sc['765'].length) RATES['765']=sc['765']; }catch(e){}
   try{ if(dr&&dr.fleets&&dr.fleets.length){ DIRECTORY.length=0; dr.fleets.forEach(function(f){DIRECTORY.push(f);}); } }catch(e){}
+  try{ if(dr&&Array.isArray(dr.extra)){ EXTRA_CONTACTS.length=0; dr.extra.forEach(function(c){EXTRA_CONTACTS.push(c);}); } }catch(e){}
   try{ var cl=function(a){ var o=[],seen={}; (a||[]).forEach(function(x){ var t=operClean(x), k=t.toLowerCase(); if(t&&!(k in seen)){ seen[k]=1; o.push(t); } }); return o; };
        var ops=cl(ls&&ls.operators), dsc=cl(ls&&ls.disc);
        if(ops.length) OPERATORS=ops;

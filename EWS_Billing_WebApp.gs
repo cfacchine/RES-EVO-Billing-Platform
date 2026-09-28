@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.27-1 · built 2026-09-27 · Removed one-time migration code (relabel, flatten, optimize, due-date repair) ==== */
+/* ==== VERSION 2026.09.27-2 · built 2026-09-27 · Directory: blank-Fleet rows = extra contacts (contacts no longer in the public page) ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.27-1', CODE_BUILT='2026-09-27';
+var CODE_VERSION='2026.09.27-2', CODE_BUILT='2026-09-27';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -365,9 +365,10 @@ function getDirectory_(){
   var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues(), m=hdr_(vals[0]);
   var iF=col_(m,['fleet #','fleet']), iN=col_(m,['supervisor','contact','name']), iE=col_(m,['supervisor email','email']),
       iP=col_(m,['supervisor phone','phone']), iO=col_(m,['current operator','operator']);
-  var out=[]; for(var r=1;r<vals.length;r++){ var v=vals[r], n=g_(v,iN); if(!n) continue;
-    out.push({fleet:String(g_(v,iF)||''),name:String(n),email:String(g_(v,iE)||''),phone:String(g_(v,iP)||''),operator:String(g_(v,iO)||'')}); }
-  return {fleets:out};
+  var out=[], extra=[]; for(var r=1;r<vals.length;r++){ var v=vals[r], n=g_(v,iN); if(!n) continue;
+    var rec={fleet:String(g_(v,iF)||'').trim(),name:String(n),email:String(g_(v,iE)||''),phone:String(g_(v,iP)||''),operator:String(g_(v,iO)||'')};
+    if(rec.fleet) out.push(rec); else extra.push({name:rec.name,email:rec.email,phone:rec.phone}); }   // blank Fleet # = extra contact
+  return {fleets:out, extra:extra};
 }
 
 /* Dropdown source lists from the "Lists" tab: A=Operators, B=Category (Disc). The first cell holds "Label FirstValue". */
