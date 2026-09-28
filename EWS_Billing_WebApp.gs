@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.26-1 · built 2026-09-26 18:00 EDT · Server-side sign-in (session tokens) + write lock enforced ==== */
+/* ==== VERSION 2026.09.26-2 · built 2026-09-27 · Sign-in ENFORCED (bypass: Run authOff) ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.26-1', CODE_BUILT='2026-09-26 18:00 EDT';
+var CODE_VERSION='2026.09.26-2', CODE_BUILT='2026-09-27';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -100,15 +100,16 @@ var A = {
         secret that lives only in Script Properties. Sessions last SESSION_HOURS.
      3. Every other GET (&s=<session>) and POST ({session}) must carry a valid session.
    Open without a session: GET version, GET pending (read-only feed for the Fleet Tracker), POST login.
-   Script Property AUTH_MODE: 'on' = enforce. Anything else = allow but log (rollout switch so the old page keeps
-   working until the new index.html is live). Set it with Run ▸ authOn / authOff. */
+   Enforcement is ON in code (AUTH_ENFORCE) so it ships with a normal deploy. Emergency bypass without a redeploy:
+   Run ▸ authOff (sets Script Property AUTH_BYPASS=yes → allow but log). Run ▸ authOn clears the bypass. */
 var AUTH_CLIENT_ID='356147624842-1m9p45pem87hcea3tcfb1e7t5gn8e2d8.apps.googleusercontent.com';
 var AUTH_DOMAIN='revolution-es.com';
 var SESSION_HOURS=12;
+var AUTH_ENFORCE=true;
 var OPEN_GET={version:1, pending:1};
-function authOn(){ PropertiesService.getScriptProperties().setProperty('AUTH_MODE','on'); return 'AUTH_MODE=on'; }
-function authOff(){ PropertiesService.getScriptProperties().setProperty('AUTH_MODE','off'); return 'AUTH_MODE=off'; }
-function authEnforced_(){ return PropertiesService.getScriptProperties().getProperty('AUTH_MODE')==='on'; }
+function authOn(){ PropertiesService.getScriptProperties().deleteProperty('AUTH_BYPASS'); return 'auth enforced'; }
+function authOff(){ PropertiesService.getScriptProperties().setProperty('AUTH_BYPASS','yes'); return 'auth BYPASSED (log only) — run authOn to restore'; }
+function authEnforced_(){ return AUTH_ENFORCE && PropertiesService.getScriptProperties().getProperty('AUTH_BYPASS')!=='yes'; }
 function sessionSecret_(){
   var pr=PropertiesService.getScriptProperties(), k=pr.getProperty('SESSION_SECRET');
   if(!k){ k=Utilities.getUuid()+Utilities.getUuid(); pr.setProperty('SESSION_SECRET',k); }
