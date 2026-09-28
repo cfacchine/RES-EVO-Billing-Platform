@@ -1031,15 +1031,21 @@ function refreshSchedule(){ FLEET_SCHED=null; FLEET_SCHED_ERR=null; renderSchedu
 function operMatch(a,b){ a=String(a||"").toLowerCase().trim(); b=String(b||"").toLowerCase().trim(); if(!a||!b) return false; return a===b||a.indexOf(b)>=0||b.indexOf(a)>=0; }
 function schedDayDelta(dstr){ var d=new Date(dstr+"T00:00:00"), n=new Date(); n.setHours(0,0,0,0); return Math.round((d-n)/86400000); }
 function schedWhen(x){ return x<0?(Math.abs(x)+"d ago"):(x===0?"today":("in "+x+"d")); }
-/* Is there already a billing row (PO request OR invoice) for this fleet+operator+unit near the op date? */
-function hasBillingFor(fleet,operator,opDate,unitWanted){
+/* Is there already a billing row (PO request OR invoice) for this job?  Same fleet + operator + unit, dated within
+   21 days of the scheduled op (Start Date when the row has one, else the document date). For Operations (765) the
+   row must also be for the same operation — a Rig Down PO no longer "covers" the Rig Up. Rows with no category
+   (older history) still count, so they don't all turn into false alarms. */
+function discMatch_(rowDisc,op){ var d=String(rowDisc||"").toLowerCase(); if(!d) return true; return d.indexOf(String(op).toLowerCase())>=0; }
+function hasBillingFor(fleet,operator,opDate,unitWanted,opLabel){
   var od=opDate?new Date(opDate+"T00:00:00"):null;
   return DATA.rows.some(function(r){
     if(String(r.fleet||"")!==String(fleet)) return false;
     if(!operMatch(r.operator,operator)) return false;
     if(unitWanted&&r.unit!==unitWanted) return false;
-    if(!od||!r.date) return true;
-    return Math.abs((new Date(r.date+"T00:00:00")-od)/86400000)<=21;
+    if(unitWanted==="765" && opLabel && !discMatch_(r.disc,opLabel)) return false;
+    var rd=r.start||r.date;
+    if(!od||!rd) return true;
+    return Math.abs((new Date(rd+"T00:00:00")-od)/86400000)<=21;
   });
 }
 function computeScheduleGaps(d){
@@ -1049,26 +1055,29 @@ function computeScheduleGaps(d){
       var opLabel=p[0], op=p[1], isRigUp=p[2];
       if(!op||!op.date) return;
       var operator=op.location||"", pad=op.pad||"";
-      if(!operator) return;                          // can't match confidently without an operator
+      if(!operator || /^n\/?a$/i.test(operator)) return;   // can't match confidently without an operator
       var delta=schedDayDelta(op.date);
-      if(delta>21) return;                           // too far out to expect a PO yet
-      if(!hasBillingFor(f.num,operator,op.date,"765"))
+      if(delta>21) return;                                  // too far out to expect a PO yet
+      if(!hasBillingFor(f.num,operator,op.date,"765",opLabel))
         out.push({fleet:f.num,operator:operator,pad:pad,date:op.date,delta:delta,op:opLabel,unit:"765",expected:"Operations PO",disc:opLabel});
       if(isRigUp && !hasBillingFor(f.num,operator,op.date,"755"))
         out.push({fleet:f.num,operator:operator,pad:pad,date:op.date,delta:delta,op:opLabel,unit:"755",expected:"Equipment Service PO",disc:"Equipment Service"});
     });
   });
-  out.sort(function(a,b){return (b.date||"").localeCompare(a.date||"");});
+  out.sort(function(a,b){ return a.delta-b.delta; });       // most overdue first, then soonest upcoming
   return out;
 }
-function startScheduledPO(fleet,operator,pad,unit,disc){
+function startScheduledPO(fleet,operator,pad,unit,disc,date){
   var v=(unit==="765")?"ops":"eq", s=state[v];
-  s.mode="PO REQUEST"; s.fleet=String(fleet); s.operator=operator; s.location=pad; s.disc=disc||(unit==="765"?"Rig Up":"Equipment Service");
-  s.poReq=""; s.inv=""; s.po="";
+  s.mode="PO REQUEST";                                      // start clean — nothing carries over from the last document
+  s.end=""; s.notes=""; s.poReq=""; s.inv=""; s.po=""; s.contact=""; s.contactInfo="";
+  s.date=iso(new Date()); s.lines=[{idx:"",qty:1,techs:1,rate:0}];
+  s.fleet=String(fleet); s.operator=operator; s.location=pad; s.disc=disc||(unit==="765"?"Rig Up":"Equipment Service");
+  s.start=date||"";
   var rec=fleetRec(fleet); if(rec){ s.contact=rec.name; s.contactInfo=[rec.phone,rec.email].filter(Boolean).join("  ·  "); }
   applyContact(v,s.contact);
   switchView(v); renderBuilder(v);
-  toast("Started a "+(unit==="765"?"Operations":"Equipment Service")+" PO Request · Fleet #"+fleet+" · "+operator+" – "+pad);
+  toast("Started a "+(unit==="765"?"Operations":"Equipment Service")+" PO Request · Fleet #"+fleet+" · "+operator+" – "+pad+(date?" · starts "+fmtDate(date):""));
 }
 function renderScheduleCheck(){
   var el=document.getElementById("schedBody"); if(!el) return;
@@ -1087,8 +1096,9 @@ function renderScheduleCheck(){
   var body=gaps.map(function(g){
     var uchip = g.unit==="755" ? '<span class="chip-b" style="background:#e0f2f0;color:#0e7d72">755 · '+esc(g.expected)+'</span>' : '<span class="chip-b" style="background:#fbeadb;color:#b5541a">765 · '+esc(g.expected)+'</span>';
     var opc = g.op==="Rig Up" ? "color:#7a4fd0" : "color:#c9821a";
-    var arg="'"+String(g.fleet).replace(/'/g,"\\'")+"','"+String(g.operator).replace(/'/g,"\\'")+"','"+String(g.pad).replace(/'/g,"\\'")+"','"+g.unit+"','"+String(g.disc).replace(/'/g,"\\'")+"'";
-    return '<tr><td class="c"><b>#'+esc(g.fleet)+'</b></td><td><b style="'+opc+'">'+esc(g.op)+'</b></td><td class="clip">'+esc(g.operator)+' – '+esc(g.pad)+'</td><td>'+fmtDate(g.date)+' <span class="sub">· '+schedWhen(g.delta)+'</span></td><td>'+uchip+'</td><td class="r"><button class="btn sm primary" onclick="startScheduledPO('+arg+')">Start PO ▸</button></td></tr>';
+    var arg="'"+String(g.fleet).replace(/'/g,"\\'")+"','"+String(g.operator).replace(/'/g,"\\'")+"','"+String(g.pad).replace(/'/g,"\\'")+"','"+g.unit+"','"+String(g.disc).replace(/'/g,"\\'")+"','"+String(g.date||"")+"'";
+    var late=g.delta<0;
+    return '<tr'+(late?' style="background:rgba(214,48,49,.08)" title="Job date has passed with no PO Request"':'')+'><td class="c"><b>#'+esc(g.fleet)+'</b></td><td><b style="'+opc+'">'+esc(g.op)+'</b></td><td class="clip">'+esc(g.operator)+' – '+esc(g.pad)+'</td><td>'+fmtDate(g.date)+' <span class="sub"'+(late?' style="color:var(--crit);font-weight:700"':'')+'>· '+schedWhen(g.delta)+(late?' — overdue':'')+'</span></td><td>'+uchip+'</td><td class="r"><button class="btn sm primary" onclick="startScheduledPO('+arg+')">Start PO ▸</button></td></tr>';
   }).join("");
   el.innerHTML='<div class="tablewrap"><table class="data"><thead><tr><th class="c">Fleet</th><th>Operation</th><th>Operator – Pad</th><th>Scheduled</th><th>Expected PO</th><th class="r">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>';
 }
