@@ -1048,7 +1048,19 @@ function hasBillingFor(fleet,operator,opDate,unitWanted,opLabel){
     return Math.abs((new Date(rd+"T00:00:00")-od)/86400000)<=21;
   });
 }
-function computeScheduleGaps(d){
+/* Scheduled ops that will never get a RES PO (work went to another vendor, cancelled, etc.).
+   Key = fleet|operation|operator|pad|date — if the schedule changes the date, the job shows up again.
+   SCHED_IGNORE_BUILTIN hides for everyone; the row's Ignore button adds to this browser's list. */
+var SCHED_IGNORE_BUILTIN={
+  "1|Rig Down|EQT|Irish Pug|2026-07-20":"Went to another vendor (Chad, 10/1)"
+};
+var SCHED_IGNORED=(function(){ try{ return new Set(JSON.parse(localStorage.getItem('revo-sched-ignored')||'[]')); }catch(e){ return new Set(); } })();
+function schedKey(g){ return [g.fleet,g.op,g.operator,g.pad,g.date].map(function(v){return String(v||"").trim();}).join("|"); }
+function schedIgnored(k){ return !!SCHED_IGNORE_BUILTIN[k] || SCHED_IGNORED.has(k); }
+function saveSchedIgnored(){ try{ localStorage.setItem('revo-sched-ignored', JSON.stringify(Array.from(SCHED_IGNORED))); }catch(e){} }
+function ignoreSched(k){ SCHED_IGNORED.add(k); saveSchedIgnored(); renderScheduleCheck(); toast("Ignored on the Work-Schedule Cross-Check"); }
+function restoreSched(k){ SCHED_IGNORED.delete(k); saveSchedIgnored(); renderScheduleCheck(); }
+function computeScheduleGaps(d,keepIgnored){
   var out=[];
   ((d&&d.fleets)||[]).forEach(function(f){
     [["Rig Up",f.rigUp,true],["Rig Down",f.rigDown,false]].forEach(function(p){
@@ -1064,6 +1076,8 @@ function computeScheduleGaps(d){
         out.push({fleet:f.num,operator:operator,pad:pad,date:op.date,delta:delta,op:opLabel,unit:"755",expected:"Equipment Service PO",disc:"Equipment Service"});
     });
   });
+  out.forEach(function(g){ g.key=schedKey(g); });
+  if(!keepIgnored) out=out.filter(function(g){ return !schedIgnored(g.key); });
   out.sort(function(a,b){ return a.delta-b.delta; });       // most overdue first, then soonest upcoming
   return out;
 }
@@ -1090,17 +1104,20 @@ function renderScheduleCheck(){
     return;
   }
   if(meta){ var lu=FLEET_SCHED.lastUpdated; meta.innerHTML="Schedule updated "+(lu?fmtDate(lu)+" "+new Date(lu).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}):"—"); }
-  var gaps=computeScheduleGaps(FLEET_SCHED);
+  var all=computeScheduleGaps(FLEET_SCHED,true), gaps=all.filter(function(g){ return !schedIgnored(g.key); });
+  var seen={}, hid=all.filter(function(g){ if(!schedIgnored(g.key)||seen[g.key]) return false; seen[g.key]=1; return true; });   // only ignores still hiding a row
+  var foot = hid.length ? '<div class="leak-dismissed">Ignored: '+hid.map(function(g){ var why=SCHED_IGNORE_BUILTIN[g.key];
+      return '<span title="'+esc(why||"Ignored in this browser")+'">#'+esc(g.fleet)+' '+esc(g.op)+' '+esc(g.operator)+' – '+esc(g.pad)+'</span>'+(why?'':' <a href="#" onclick="restoreSched(\''+g.key.replace(/[\\\']/g,'')+'\');return false;">restore</a>'); }).join(' · ')+'</div>' : '';
   if(cnt) cnt.textContent=gaps.length;
-  if(!gaps.length){ el.innerHTML='<div class="sub" style="padding:8px 2px">Every scheduled rig-up and rig-down has a matching PO Request. 🎉</div>'; return; }
+  if(!gaps.length){ el.innerHTML='<div class="sub" style="padding:8px 2px">Every scheduled rig-up and rig-down has a matching PO Request. 🎉</div>'+foot; return; }
   var body=gaps.map(function(g){
     var uchip = g.unit==="755" ? '<span class="chip-b" style="background:#e0f2f0;color:#0e7d72">755 · '+esc(g.expected)+'</span>' : '<span class="chip-b" style="background:#fbeadb;color:#b5541a">765 · '+esc(g.expected)+'</span>';
     var opc = g.op==="Rig Up" ? "color:#7a4fd0" : "color:#c9821a";
     var arg="'"+String(g.fleet).replace(/'/g,"\\'")+"','"+String(g.operator).replace(/'/g,"\\'")+"','"+String(g.pad).replace(/'/g,"\\'")+"','"+g.unit+"','"+String(g.disc).replace(/'/g,"\\'")+"','"+String(g.date||"")+"'";
     var late=g.delta<0;
-    return '<tr'+(late?' style="background:rgba(214,48,49,.08)" title="Job date has passed with no PO Request"':'')+'><td class="c"><b>#'+esc(g.fleet)+'</b></td><td><b style="'+opc+'">'+esc(g.op)+'</b></td><td class="clip">'+esc(g.operator)+' – '+esc(g.pad)+'</td><td>'+fmtDate(g.date)+' <span class="sub"'+(late?' style="color:var(--crit);font-weight:700"':'')+'>· '+schedWhen(g.delta)+(late?' — overdue':'')+'</span></td><td>'+uchip+'</td><td class="r"><button class="btn sm primary" onclick="startScheduledPO('+arg+')">Start PO ▸</button></td></tr>';
+    return '<tr'+(late?' style="background:rgba(214,48,49,.08)" title="Job date has passed with no PO Request"':'')+'><td class="c"><b>#'+esc(g.fleet)+'</b></td><td><b style="'+opc+'">'+esc(g.op)+'</b></td><td class="clip">'+esc(g.operator)+' – '+esc(g.pad)+'</td><td>'+fmtDate(g.date)+' <span class="sub"'+(late?' style="color:var(--crit);font-weight:700"':'')+'>· '+schedWhen(g.delta)+(late?' — overdue':'')+'</span></td><td>'+uchip+'</td><td class="r" style="white-space:nowrap"><button class="btn sm primary" onclick="startScheduledPO('+arg+')">Start PO ▸</button> <button class="btn sm" title="Not ours — e.g. went to another vendor. Hides this job here." onclick="ignoreSched(\''+g.key.replace(/[\\\']/g,'')+'\')">Ignore</button></td></tr>';
   }).join("");
-  el.innerHTML='<div class="tablewrap"><table class="data"><thead><tr><th class="c">Fleet</th><th>Operation</th><th>Operator – Pad</th><th>Scheduled</th><th>Expected PO</th><th class="r">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>';
+  el.innerHTML='<div class="tablewrap"><table class="data"><thead><tr><th class="c">Fleet</th><th>Operation</th><th>Operator – Pad</th><th>Scheduled</th><th>Expected PO</th><th class="r">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>'+foot;
 }
 
 /* Open AR, optionally narrowed to one customer (the Customer filter on the view) */
