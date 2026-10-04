@@ -286,6 +286,8 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
 .doc-noa{border:1px solid #bbb;border-radius:4px;padding:9px 12px;font-size:8.5px;color:#333;line-height:1.4;background:#fbfbfb;max-width:280px}
 .doc-noa .h{font-family:"Archivo";font-weight:700;font-size:9px;letter-spacing:.06em;color:#111;text-transform:uppercase;border-bottom:1px solid #ddd;padding-bottom:3px;margin-bottom:4px} .doc-noa b{color:#111}
 .doc-thanks{font-family:"Archivo";font-weight:800;font-size:15px;font-style:italic;color:#1a7a3e;text-align:right}
+.doc-sign{width:300px;background:#eaf3ee;padding:9px 12px 8px;color:#0f4f27;font-size:9.5px} .doc-sign .h{font-family:"Archivo";font-weight:700;font-size:11px;color:#0f4f27;margin-bottom:2px}
+.doc-sign .ln{border-bottom:1px solid #1a7a3e;height:24px} .doc-sign .l{margin-top:2px;margin-bottom:4px;color:#1a7a3e} .doc-sign .two{display:grid;grid-template-columns:1.6fr 1fr;gap:12px}
 .doc-footbar{border-top:2px solid #1a7a3e;margin-top:14px;padding-top:7px;display:flex;justify-content:space-between;font-size:8.5px;color:#1a7a3e;font-weight:600} .doc-footbar .r{color:#999;font-weight:500;text-align:right}
 
 .tr-sel{padding:3px 4px;font-size:11px;border-radius:6px} .saved-flash{color:var(--ok);font-size:10.5px;font-weight:600;opacity:0;transition:opacity .2s} .saved-flash.on{opacity:1}
@@ -1745,7 +1747,7 @@ function buildDoc(v){
     +'<table class="doc-tbl"><thead><tr><th class="gut"></th><th>Description</th><th class="c">Qty</th><th class="c">Unit</th><th class="r">Per Unit</th><th class="r">Amount</th></tr></thead><tbody>'+rows+'</tbody></table>'
     +'<div class="doc-tot"><div class="box"><div class="row"><span class="l">Subtotal</span><span class="v">'+money(sub)+'</span></div><div class="row grand"><span class="l">'+(isInv?"TOTAL DUE":"TOTAL")+'</span><span class="v">'+money(sub)+'</span></div></div></div>'
     +(s.notes?'<div class="doc-notes"><div class="h">Notes</div><div class="b">'+esc(s.notes)+'</div></div>':"")
-    +'<div class="doc-foot"><div class="doc-noa"><div class="h">Notice of Assignment</div>'+esc(CONFIG.NOA.note)+'<br><b>'+esc(CONFIG.NOA.name)+'</b> · '+esc(CONFIG.NOA.l1)+' · '+esc(CONFIG.NOA.l2)+'</div><div class="doc-thanks">THANK YOU FOR<br>YOUR BUSINESS</div></div>'
+    +'<div class="doc-foot"><div class="doc-noa"><div class="h">Notice of Assignment</div>'+esc(CONFIG.NOA.note)+'<br><b>'+esc(CONFIG.NOA.name)+'</b> · '+esc(CONFIG.NOA.l1)+' · '+esc(CONFIG.NOA.l2)+'</div>'+(isInv?'<div class="doc-sign"><div class="h">Customer Approval</div><div class="ln"></div><div class="l">Signature</div><div class="two"><div><div class="ln"></div><div class="l">Name</div></div><div><div class="ln"></div><div class="l">Date</div></div></div></div>':'<div class="doc-thanks">THANK YOU FOR<br>YOUR BUSINESS</div>')+'</div>'
     +'<div class="doc-footbar"><span>'+esc(c.name)+' · <b>'+esc(c.division)+'</b> · '+esc(c.addr)+', '+esc(c.city)+'</span><span class="r">'+esc(c.ar)+'<br>'+esc(c.email)+'</span></div></div>';
 }
 function renderDoc(v){ var el=document.getElementById("doc-"+v); if(el) el.innerHTML=buildDoc(v); }
