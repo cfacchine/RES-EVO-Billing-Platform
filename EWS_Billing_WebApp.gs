@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.09.27-2 · built 2026-09-27 · Directory: blank-Fleet rows = extra contacts (contacts no longer in the public page) ==== */
+/* ==== VERSION 2026.10.04-1 · built 2026-10-04 · Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.09.27-2', CODE_BUILT='2026-09-27';
+var CODE_VERSION='2026.10.04-1', CODE_BUILT='2026-10-04';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -36,16 +36,17 @@ var LOG_TAB  = 'Access Log';                                     // sign-in audi
 var EMAIL_TAB= 'Email Lists';                                    // CC recipients per doc type: A=PO Request, B=Invoice, C=Reminder, D=Collections
 var DRIVE_ROOT = '1U3dQyP_Il3aQzAcmBr5NyNzPVLmprqGJ';           // cfacchine-owned "EWS Billing" folder (sections: Invoice Request / PO Assigned / Invoice Signed / PO Requests). Was 1uMR9dqS52Z4ZqUAqmIaLzUqLhpmmtAZY (personal-account folder).
 
-/* Inbox auto-file (#1): scans Gmail for customer replies with a PDF, files it to Drive under the Job ID
-   scheme (approved PO → <unit> / 2 · Customer POs, signed invoice → <unit> / 4 · Signed Invoices), links it on
-   the tracker row and flags it for a one-click confirm. It NEVER flips PO/Signed on its own. Preview-safe.
-   (POASSIGNED_FOLDER / SIGNED_FOLDER below are legacy and no longer used.) */
+/* Gmail auto-file (#1, rewritten 2026-10-04): opens each PDF customers / the field send back (Drive OCR) and files it
+   only once the document itself checks out — approved customer PO → 2 · Customer POs, signed invoice → 4 · Signed
+   Invoices. Links it on the row and flags "… received — confirm"; NEVER flips PO / Signed / Paid. See scanInbox_. */
 var INBOX = {
-  POASSIGNED_FOLDER: 'PO Assigned',       // approved customer-PO PDFs land here (under EWS Billing / <folder> / <year>)
-  SIGNED_FOLDER:     'Invoice Signed',    // signed-invoice PDFs land here
-  LOG_TAB: 'Inbox Log',                   // processed Gmail message ids (dedupe)
-  LOOKBACK_DAYS: 30,                      // scan replies received in the last N days
-  HOUR: 6                                 // daily trigger hour if you install it
+  LOG_TAB: 'Inbox Log',                   // every PDF it looked at: decision + reason (also the dedupe list)
+  LOOKBACK_DAYS: 21,                      // scan mail received in the last N days
+  EVERY_HOURS: 1,                         // trigger interval once installInboxScan has been run
+  MAX_THREADS: 60,                        // threads per run (newest first)
+  TIME_BUDGET_MS: 270000,                 // stop well inside the 6-min limit; the next run picks up the rest
+  LABEL_FILED: 'EWS Billing/Auto-filed',
+  LABEL_REVIEW: 'EWS Billing/Needs review'
 };
 
 /* Email CC lists — one "Email Lists" tab controls who is CC'd on each document type. These defaults seed
@@ -629,18 +630,27 @@ function tidyBillingTracker_(preview){
 
 function updateRow_(p){
   if(p.field==='draft') return setDraft_(p);
-  if(!p.inv) return false;
+  if(!p.inv && !p.poReq) return false;
   var ss=SpreadsheetApp.openById(BOOK_ID);
   var isPaid=p.field==='paid';
   var target = p.field==='signed'?A.signed : p.field==='poAssigned'?['po assigned'] : isPaid?A.paid : A.reminder;
   var mark=(String(p.value).toLowerCase().charAt(0)==='y')?'Yes':'No';
-  var f=findRowBy_(ss,A.inv,p.inv); if(!f) return false;                      // #7: one-column lookup
+  var f=(p.inv && findRowBy_(ss,A.inv,p.inv)) || (p.poReq && findRowBy_(ss,A.poReq,p.poReq)); if(!f) return false;   // rows still at "PO requested" have no Invoice # yet
   var iCol=col_(f.m,target);
   if(iCol>=0) f.sh.getRange(f.row,iCol+1).setValue(mark==='Yes'?((isPaid||p.field==='signed')?'Yes':'X'):'');   // Signed and Paid write "Yes"; x_() still reads old X cells as Yes
   if(isPaid){ var iSt=col_(f.m,A.status);
     if(iSt>=0){ var stc=f.sh.getRange(f.row,iSt+1), cur=String(stc.getValue()||'').trim();
       if(mark==='Yes') stc.setValue('Paid');
       else if(/^paid$/i.test(cur)) stc.setValue(''); } }
+  if(mark==='Yes' && (p.field==='signed'||p.field==='poAssigned')){             // confirming a Gmail/Inbox-filed PDF clears its flag
+    var iFl=col_(f.m,A.inbox);
+    if(iFl>=0){ var fc=f.sh.getRange(f.row,iFl+1), flag=String(fc.getValue()||'');
+      if(p.field==='poAssigned' && /^Customer PO/i.test(flag)){
+        var pm=flag.match(/EWSO?-PO-\d+/i), iPo=col_(f.m,A.po);                  // PO # read off the PDF → PO # column if still blank
+        if(pm && iPo>=0){ var pc=f.sh.getRange(f.row,iPo+1); if(!String(pc.getValue()||'').trim()) pc.setValue(pm[0].toUpperCase()); }
+        fc.setValue(''); }
+      if(p.field==='signed' && /^Signed/i.test(flag)) fc.setValue('');
+    } }
   return true;
 }
 
@@ -972,72 +982,148 @@ function apLogWrite_(key,date,type,label){
 function apDays_(d,today){ if(!d) return 0; var dd=(d instanceof Date)?d:new Date(String(d)+'T00:00:00'); if(isNaN(dd.getTime())) return 0; return Math.max(0,Math.round((today-dd)/86400000)); }
 
 /*************************************************************************************************
- * INBOX AUTO-FILE (#1) — scans Gmail for customer replies carrying a PDF, files it to Drive by
- *   year (approved PO → "PO Assigned"/Year, signed invoice → "Invoice Signed"/Year), links it on
- *   the matching tracker row and flags it "… — confirm". It NEVER flips PO/Signed on its own —
- *   you do that with one click on the Pipeline. Safe to re-run; each Gmail message is filed once.
+ * GMAIL AUTO-FILE (#1) — verified (2026-10-04).
+ *   Looks at every PDF attachment received in the last LOOKBACK_DAYS (not just the inbox, not our own sends),
+ *   OCRs it and decides from the DOCUMENT ITSELF what it is:
+ *     • Approved customer PO  — says "Purchase Order", carries an EWS-PO-#### / EWSO-PO-#### number, and ties to a
+ *       job by a PO Request # printed on it, or a PO # already on the tracker, or (thread's PO Request # + amount +
+ *       operator all agreeing). → 2 · Customer POs, flag "Customer PO EWS-PO-#### received — confirm".
+ *     • Signed invoice — our invoice (Revolution Energy letterhead + an invoice # on the tracker + the amount or
+ *       operator on it), NOT byte-identical to the copy we sent, with some sign it was signed (the email / file name
+ *       says signed/approved/signature/scan, or an e-signature stamp). → 4 · Signed Invoices.
+ *   Skipped quietly: our own PO Requests / unsigned invoices echoed back, PDFs that are none of the above.
+ *   Needs review (Gmail label + Inbox Log, nothing filed): anything that looks like one of the two but fails a check,
+ *   or a row that already has a PO / signed PDF linked.
+ *   Never flips PO / Signed / Paid. Mark PO received / Mark signed clear the flag (and fill a blank PO # from it).
  *
- *   Run ▸ inboxScanPreview   → reports what it WOULD file, writes nothing.
- *   Run ▸ scanInbox          → files + links + flags for real.
- *   Run ▸ installInboxScan   → do it automatically every day (approve the Gmail/Drive prompt once).
- *   Run ▸ removeInboxScan    → stop the daily run.
+ *   Needs Services ▸ + ▸ Drive API (for OCR).
+ *   Run ▸ inboxScanPreview   → what it WOULD do, writes nothing (no log, no labels).
+ *   Run ▸ scanInbox          → for real.
+ *   Run ▸ installInboxScan   → every EVERY_HOURS hour(s).      Run ▸ removeInboxScan → stop.
  *************************************************************************************************/
-function inboxScanPreview(){ return scanInbox_(true); }
-function scanInbox(){ return scanInbox_(false); }
+function inboxScanPreview(){ var r=scanInbox_(true); Logger.log(r); return r; }
+function scanInbox(){ var r=scanInbox_(false); Logger.log(r); return r; }
 function installInboxScan(){
   removeInboxScan();
-  ScriptApp.newTrigger('scanInbox').timeBased().everyDays(1).atHour(INBOX.HOUR).create();
-  return 'Inbox auto-file installed — runs daily ~'+INBOX.HOUR+':00. Preview any time with inboxScanPreview.';
+  ScriptApp.newTrigger('scanInbox').timeBased().everyHours(INBOX.EVERY_HOURS).create();
+  return 'Gmail auto-file installed — runs every '+INBOX.EVERY_HOURS+' hour(s). Preview any time with inboxScanPreview.'+
+    (typeof Drive==='undefined'?'\n⚠ Add Services ▸ Drive API first — without it every PDF goes to Needs review.':'');
 }
 function removeInboxScan(){ var n=0; ScriptApp.getProjectTriggers().forEach(function(t){ if(t.getHandlerFunction()==='scanInbox'){ ScriptApp.deleteTrigger(t); n++; } }); return 'Removed '+n+' inbox trigger(s).'; }
 
 function scanInbox_(preview){
-  var ss=SpreadsheetApp.openById(BOOK_ID), sh=ss.getSheetByName(WRITE_TAB);
-  if(!sh) return 'Billing Tracker tab not found.';
-  var vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
-  var hr=trackerHeaderRow_(vals); if(hr<0) hr=0;
-  var m = preview ? hdr_(vals[hr]) : ensureInboxCols_(sh,hr);      // add PO/Signed PDF + Inbox columns if missing
-  var iInv=col_(m,A.inv), iPoReq=col_(m,A.poReq), iPo=col_(m,A.po);
-  var byInv={}, byPoReq={};
-  for(var r=hr+1;r<vals.length;r++){
-    var inv=String(iInv>=0?vals[r][iInv]:'').trim(); if(inv) byInv[inv.toLowerCase()]=r;
-    var pr=String(iPoReq>=0?vals[r][iPoReq]:'').trim(); if(pr) byPoReq[pr.toLowerCase()]=r;
+  if(typeof Drive==='undefined') return 'The Gmail scan reads each PDF before filing it, which needs Services ▸ + ▸ Drive API. Nothing was scanned.';
+  var T0=Date.now(), X=trackerIndex_(); if(!X) return 'Billing Tracker tab not found.';
+  var seen=inboxSeen_(X.ss), root=DriveApp.getFolderById(DRIVE_ROOT), filed=[], review=[], skipped=0, timedOut=false, logRows=[];
+  var q='has:attachment filename:pdf newer_than:'+INBOX.LOOKBACK_DAYS+'d -from:me -in:spam -in:trash '+
+        '{"purchase order" PO invoice signed approved EWS-PO EWSO-PO EWS-POR}';
+  var threads=GmailApp.search(q,0,INBOX.MAX_THREADS);
+  for(var t=0;t<threads.length && !timedOut;t++){
+    var th=threads[t], thSubj=th.getFirstMessageSubject()||'', msgs=th.getMessages(), lab='';
+    for(var mi=0;mi<msgs.length && !timedOut;mi++){
+      var msg=msgs[mi], mid=msg.getId(); if(seen[mid]) continue;                          // filed by the old scanner
+      if(msg.isInTrash()) continue;
+      var atts=msg.getAttachments({includeInlineImages:false}).filter(function(a){ return /\.pdf$/i.test(a.getName())||a.getContentType()==='application/pdf'; });
+      for(var ai=0;ai<atts.length;ai++){
+        var key=mid+'#'+ai; if(seen[key]) continue;
+        if(Date.now()-T0>INBOX.TIME_BUDGET_MS){ timedOut=true; break; }
+        var att=atts[ai], md5=md5Hex_(att.getBytes()), from=String(msg.getFrom()||'').replace(/.*</,'').replace('>','');
+        var base=[key,'',new Date(),from,msg.getSubject()||'',att.getName()];
+        if(seen['md5:'+md5]){ logRows.push(base.concat(['skipped','same PDF already processed',md5])); skipped++; continue; }
+        var v; try{ v=verifyInboxPdf_(X,att,msg,thSubj,md5); }catch(e){ v={d:'review',why:'error reading PDF: '+e}; }
+        if(v.d==='file'){
+          var p=rowFields_(X,pickRow_(X,v.rows),{date:isoDay_(msg.getDate())});
+          if(v.action==='signed') p.inv=v.inv||p.inv;
+          if(v.action==='custpo' && v.po) p.po=v.po;
+          var fname=pdfFileName_(p,v.action), uf=unitFolder_(p.unit), where=uf?(uf+' / '+stageFolder_(v.action)):'EWS Billing (unit unknown)';
+          if(preview){ filed.push(fname+'  →  '+where+'   ['+v.why+']   (from '+from+')'); seen['md5:'+md5]=1; continue; }
+          var folder=billingFolder_(root,p,v.action); fname=uniqueName_(folder,fname);
+          var url=folder.createFile(att.copyBlob().setName(fname)).getUrl();
+          linkFiled_(X,v.rows,v.action,url,v.flag);
+          filed.push(fname+'  →  '+where+'   ['+v.why+']');
+          base[1]=fname; logRows.push(base.concat(['filed',v.why,md5])); seen['md5:'+md5]=1; lab='filed';
+        } else if(v.d==='review'){
+          review.push(att.getName()+'  (from '+from+', "'+(msg.getSubject()||'')+'"): '+v.why);
+          if(!preview){ logRows.push(base.concat(['needs review',v.why,md5])); if(lab!=='filed') lab='review'; }
+        } else { skipped++; if(!preview) logRows.push(base.concat(['skipped',v.why,md5])); }
+      }
+    }
+    if(!preview && lab){ try{ th.addLabel(gmailLabel_(lab==='filed'?INBOX.LABEL_FILED:INBOX.LABEL_REVIEW)); }catch(e){} }
   }
-  var seen=inboxSeen_(ss), root=DriveApp.getFolderById(DRIVE_ROOT), filed=[];
-  var q='in:inbox has:attachment newer_than:'+INBOX.LOOKBACK_DAYS+'d (subject:"PO Request" OR subject:"Invoice" OR "EWS-POR" OR "EWSO-POR")';
-  GmailApp.search(q,0,80).forEach(function(th){
-    th.getMessages().forEach(function(msg){
-      try{
-        var id=msg.getId(); if(seen[id]) return;
-        if(/revolution-es\.com/i.test(msg.getFrom()||'')) return;                 // skip our own sends
-        var atts=msg.getAttachments().filter(function(a){ return /\.pdf$/i.test(a.getName())||a.getContentType()==='application/pdf'; });
-        if(!atts.length) return;
-        var subj=msg.getSubject()||'';
-        var invM=subj.match(/\b(5[01]\d{3,})\b/), poM=subj.match(/EWSO?-POR-\S+/i);
-        var kind=null, rowIdx=-1, docNo='';
-        if(invM && byInv[invM[1].toLowerCase()]!=null){ kind='signed'; rowIdx=byInv[invM[1].toLowerCase()]; docNo=invM[1]; }
-        else if(poM && byPoReq[poM[0].toLowerCase()]!=null){ kind='po'; rowIdx=byPoReq[poM[0].toLowerCase()]; docNo=poM[0]; }
-        if(!kind || rowIdx<0) return;
-        var action=(kind==='signed')?'signed':'custpo';
-        var rp={ operator:cellVal_(vals[rowIdx],m,A.operator), location:cellVal_(vals[rowIdx],m,A.location),
-                 disc:cellVal_(vals[rowIdx],m,A.disc), unit:cellVal_(vals[rowIdx],m,A.unit),
-                 inv:(kind==='signed')?docNo:cellVal_(vals[rowIdx],m,A.inv), po:cellVal_(vals[rowIdx],m,A.po),
-                 poReq:cellVal_(vals[rowIdx],m,A.poReq)||(kind==='po'?docNo:''), date:msg.getDate() };  // fields from the matched tracker row
-        var fname=pdfFileName_(rp,action);                                       // <Job ID> - 2 PO … / 4 SIGNED INV … scheme
-        var uf=unitFolder_(rp.unit), where=uf?(uf+' / '+stageFolder_(action)):'EWS Billing (unit unknown)';
-        if(preview){ filed.push(fname+'  →  '+where+'   (from '+String(msg.getFrom()).replace(/.*</,'').replace('>','')+')'); return; }
-        var folder=billingFolder_(root,rp,action);                               // EWS Billing / <unit> / <stage>
-        var ex=folder.getFilesByName(fname); while(ex.hasNext()) ex.next().setTrashed(true);
-        var url=folder.createFile(atts[0].copyBlob().setName(fname)).getUrl();
-        setCellByName_(sh,rowIdx,m,(kind==='signed')?A.sgnPdf:A.poPdf,url);
-        setCellByName_(sh,rowIdx,m,A.inbox,(kind==='signed')?'Signed PDF received — confirm':'Customer PO received — confirm');
-        inboxMarkSeen_(ss,id,fname);
-        filed.push(fname+'  →  '+where);
-      }catch(e){ /* skip a bad message, keep going */ }
-    });
-  });
-  return (preview?'WOULD file ':'Filed ')+filed.length+' PDF(s)'+(filed.length?':\n • '+filed.join('\n • '):'.')+(preview?'\n\n(preview only — nothing written)':'');
+  if(!preview){ inboxLog_(X.ss,logRows); if(filed.length) bustCache_(); }
+  var out=(preview?'WOULD file ':'Filed ')+filed.length+' PDF(s)'+(filed.length?':\n • '+filed.join('\n • '):'.');
+  if(review.length) out+='\n\nNeeds review ('+review.length+') — not filed'+(preview?'':', labelled "'+INBOX.LABEL_REVIEW+'"')+':\n • '+review.join('\n • ');
+  out+='\n\nSkipped '+skipped+' (not a customer PO / signed invoice, or already processed).';
+  if(timedOut) out+='\n⏱ Stopped at the time limit — the next run continues.';
+  return out+(preview?'\n\n(preview only — nothing written)':'');
 }
+
+/* Decide what one PDF attachment is. → {d:'file'|'review'|'skip', action, rows, inv, po, flag, why} */
+function verifyInboxPdf_(X,att,msg,thSubj,md5){
+  var raw=pdfTextBlob_(att.copyBlob());
+  if(!raw) return {d:'review',why:'could not read the PDF (OCR returned nothing)'};
+  var T=String(raw).toUpperCase().replace(/\s+/g,' ');
+  var K=T.replace(/0/g,'O').replace(/[1|]/g,'I');                         // keyword copy: OCR reads O as 0 / I as 1 on scans
+  var ctx=(thSubj+' '+(msg.getSubject()||'')+' '+att.getName()+' '+String(msg.getPlainBody()||'').slice(0,3000)).toUpperCase();
+  var uniq=function(a){ return a.filter(function(x,i){ return a.indexOf(x)===i; }); };
+  var porRows=function(s){ var o=[], m, rx=/EWSO?\s*-?\s*POR\s*-?\s*(?:[A-Z]{2}\s*-?\s*)?\d+/gi; while((m=rx.exec(s))){ var k=porNorm_(m[0]); if(X.byPoReq[k]) o=o.concat(X.byPoReq[k]); } return uniq(o); };
+  var rowAmt=function(r){ return Number(String(cellVal_(X.vals[r],X.m,A.amount)).replace(/[^0-9.\-]/g,''))||0; };
+  var amtOn=function(r){ var a=rowAmt(r); if(!a) return false;
+    var c=a.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,','), plain=a.toFixed(2);
+    return T.indexOf(c)>=0 || T.indexOf(plain)>=0 || (a%1===0 && T.indexOf(c.slice(0,-3))>=0); };
+  var opOn=function(r){ var w=String(cellVal_(X.vals[r],X.m,A.operator)).toUpperCase().split(/[^A-Z0-9]+/).filter(function(x){return x.length>=3;})[0]; return !!w && T.indexOf(w)>=0; };
+  var linked=function(r,names){ return !!String(cellVal_(X.vals[r],X.m,names)).trim(); };
+  var fileMd5=function(url){ var m=String(url||'').match(/[-\w]{25,}/); if(!m) return ''; try{ return md5Hex_(DriveApp.getFileById(m[0]).getBlob().getBytes()); }catch(e){ return ''; } };
+
+  /* ---- Customer PO ---- */
+  var poNums=[], mm, rxPo=/\b(EWSO?)\s*-?\s*PO\s*-?\s*(\d{3,6})\b/g;
+  while((mm=rxPo.exec(T))){ var pn=mm[1]+'-PO-'+mm[2]; if(poNums.indexOf(pn)<0) poNums.push(pn); }
+  var saysPO=/PURCHASE\s*ORDER/.test(K);
+  if(/\bPO\s*REQUEST\b/.test(K) && !poNums.length) return {d:'skip',why:'our own PO Request'};
+  if(saysPO && poNums.length){
+    if(poNums.length>1) return {d:'review',why:'several PO numbers on the PDF ('+poNums.join(', ')+')'};
+    var po=poNums[0], rows=porRows(T), how='PO Request # on the PO';
+    if(!rows.length && X.byCustPo[normId_(po)]){ rows=uniq(X.byCustPo[normId_(po)]); how='PO # already on the tracker'; }
+    if(!rows.length){ var hr=porRows(ctx);
+      if(hr.length && hr.every(function(r){ return amtOn(r) && opOn(r); })){ rows=hr; how='email thread PO Request # + amount + operator match'; }
+      else return {d:'review',why:po+' found but it doesn\'t tie to a job (no PO Request # on it'+(hr.length?'; thread\'s job amount/operator don\'t match':'')+')'}; }
+    var r0=pickRow_(X,rows), curPo=String(cellVal_(X.vals[r0],X.m,A.po)).trim();
+    if(curPo && normId_(curPo).replace(/\D/g,'')!==po.replace(/\D/g,'')) return {d:'review',why:po+' but the row already has PO '+curPo};
+    if(rows.some(function(r){ return linked(r,A.poPdf); })){
+      var have=rows.map(function(r){ return fileMd5(cellVal_(X.vals[r],X.m,A.poPdf)); });
+      if(have.indexOf(md5)>=0) return {d:'skip',why:'this PO is already linked'};
+      return {d:'review',why:po+' — the row already has an approved PO linked (newer revision?)'}; }
+    var notes=[], uc=unitCode_(cellVal_(X.vals[r0],X.m,A.unit)), pu=/^EWSO/.test(po)?'765':'755';
+    if(!amtOn(r0)) notes.push('amount not matched');
+    if(uc && uc!==pu) notes.push(po.split('-')[0]+' is a '+pu+' PO, row is '+uc);
+    return {d:'file',action:'custpo',rows:rows,po:po,why:how+(notes.length?'; '+notes.join('; '):''),
+            flag:'Customer PO '+po+' received'+(notes.length?' ('+notes.join('; ')+')':'')+' — confirm'};
+  }
+
+  /* ---- Signed invoice ---- */
+  if(/INVOICE/.test(K)){
+    var invs=[], rxI=/\b(5[01]\d{3})\b/g; while((mm=rxI.exec(T))){ if(X.byInv[mm[1]]!=null && invs.indexOf(mm[1])<0) invs.push(mm[1]); }
+    if(!invs.length){ var any=T.match(/\b5[01]\d{3}\b/);
+      return /REVOLUTION\s*ENERGY/.test(K)&&any ? {d:'review',why:'Revolution invoice '+any[0]+' is not on the tracker'} : {d:'skip',why:'an invoice, but not one of ours'}; }
+    if(invs.length>1){ var lab=T.match(/INVOICE\s*(?:#|NO\.?|NUMBER)?\s*:?\s*(5[01]\d{3})\b/); invs=lab&&X.byInv[lab[1]]!=null?[lab[1]]:invs; }
+    if(invs.length>1) return {d:'review',why:'several tracker invoice #s on the PDF ('+invs.join(', ')+')'};
+    var inv=invs[0], r=X.byInv[inv];
+    if(!/REVOLUTION\s*ENERGY/.test(K)) return {d:'review',why:'invoice '+inv+' found, but it isn\'t on Revolution letterhead'};
+    if(!amtOn(r) && !opOn(r)) return {d:'review',why:'invoice '+inv+': neither the amount nor the operator on the PDF matches the tracker'};
+    if(md5 && md5===fileMd5(cellVal_(X.vals[r],X.m,A.invPdf))) return {d:'skip',why:'our unsigned invoice '+inv+' sent back'};
+    if(linked(r,A.sgnPdf)){ if(fileMd5(cellVal_(X.vals[r],X.m,A.sgnPdf))===md5) return {d:'skip',why:'signed '+inv+' already linked'};
+      return {d:'review',why:'invoice '+inv+' already has a signed PDF linked'}; }
+    var ev=/\bSIGNED\b|\bSIGNATURE\b|\bAPPROVED\b|\bEXECUTED\b|\bSCAN|CAMSCANNER|\bIMG[_-]?\d/.test(ctx) ? 'email/file says signed'
+         : /DOCUSIGN|ENVELOPE ID|ADOBE SIGN|SIGNED BY|E-?SIGNED|DIGITALLY SIGNED/.test(K) ? 'e-signature on the PDF' : '';
+    if(!ev) return {d:'review',why:'invoice '+inv+' verified, but nothing says it was signed — open it and file it if it is'};
+    return {d:'file',action:'signed',rows:[r],inv:inv,why:'invoice '+inv+' ('+(amtOn(r)?'amount':'operator')+' matches; '+ev+')',
+            flag:'Signed PDF received — confirm'};
+  }
+  return {d:'skip',why:'not a customer PO or invoice'};
+}
+
+function md5Hex_(bytes){ return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,bytes).map(function(b){ return ('0'+(b&255).toString(16)).slice(-2); }).join(''); }
+function gmailLabel_(name){ return GmailApp.getUserLabelByName(name)||GmailApp.createLabel(name); }
 function ensureInboxCols_(sh,hr){
   var need=[['po request pdf','PO Request PDF'],['invoice pdf','Invoice PDF'],['po assigned pdf','PO Assigned PDF'],['signed invoice pdf','Signed Invoice PDF'],['inbox','Inbox']];
   var hdrs=sh.getRange(hr+1,1,1,sh.getLastColumn()).getValues()[0].map(function(x){return String(x).trim().toLowerCase();});
@@ -1046,11 +1132,20 @@ function ensureInboxCols_(sh,hr){
 }
 function setCellByName_(sh,rowIdx,m,names,val){ var c=col_(m,names); if(c>=0 && val!==''&&val!=null) sh.getRange(rowIdx+1,c+1).setValue(val); }
 function cellVal_(rowVals,m,names){ var c=col_(m,names); return c>=0?String(rowVals[c]==null?'':rowVals[c]):''; }
+/* Inbox Log: A key (message id[#attachment]) · B filed as · C when · D from · E subject · F attachment · G decision · H reason · I md5 */
+var INBOX_LOG_HDR=['Key','Filed as','When','From','Subject','Attachment','Decision','Reason','MD5'];
+function inboxLogSheet_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB)||ss.insertSheet(INBOX.LOG_TAB);
+  if(String(sh.getRange(1,9).getValue())!=='MD5'){ sh.getRange(1,1,1,9).setValues([INBOX_LOG_HDR]).setFontWeight('bold'); sh.setFrozenRows(1); }
+  return sh; }
 function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
-  sh.getRange(2,1,sh.getLastRow()-1,1).getValues().forEach(function(r){ if(r[0]) map[String(r[0])]=1; }); return map; }
-function inboxMarkSeen_(ss,id,label){ var sh=ss.getSheetByName(INBOX.LOG_TAB);
-  if(!sh){ sh=ss.insertSheet(INBOX.LOG_TAB); sh.getRange(1,1,1,3).setValues([['Message Id','Filed','When']]); sh.setFrozenRows(1); }
-  sh.appendRow([id,label,new Date()]); }
+  sh.getRange(2,1,sh.getLastRow()-1,Math.max(9,Math.min(sh.getLastColumn(),9))).getValues().forEach(function(r){
+    if(r[0]) map[String(r[0])]=1;
+    if(r[8] && /^(filed|skipped)$/.test(String(r[6]))) map['md5:'+r[8]]=1; });   // same PDF in another email → don't redo it
+  return map; }
+function inboxLog_(ss,rows){ if(!rows.length) return; var sh=inboxLogSheet_(ss);
+  sh.getRange(sh.getLastRow()+1,1,rows.length,9).setValues(rows);
+  rows.forEach(function(r,i){ if(r[6]==='needs review') sh.getRange(sh.getLastRow()-rows.length+1+i,1,1,9).setBackground('#FFF4E0');
+    else if(r[6]==='filed') sh.getRange(sh.getLastRow()-rows.length+1+i,1,1,9).setBackground('#E6F4EA'); }); }
 
 /* Pull the invoice # out of a filename, ANCHORED on the word "Invoice"/"Inv" (or an explicit "EWS-#####")
    so a stray 5-digit number in the name (fleet #, customer PO #, a date, a $ amount) is never mistaken
@@ -1214,11 +1309,11 @@ function rowFields_(X,r,extra){
   return o;
 }
 /* Text of a PDF via Drive OCR (needs the Drive API advanced service; '' if it's off or fails). */
-function pdfText_(file){
+function pdfText_(file){ return pdfTextBlob_(file.getBlob()); }
+function pdfTextBlob_(blob){
   if(typeof Drive==='undefined') return '';
   var id='';
   try{
-    var blob=file.getBlob();
     if(Drive.Files.create){ id=Drive.Files.create({name:'_ocr_tmp',mimeType:MimeType.GOOGLE_DOCS},blob,{ocrLanguage:'en'}).id; }   // Drive API v3
     else { id=Drive.Files.insert({title:'_ocr_tmp',mimeType:MimeType.GOOGLE_DOCS},blob,{ocr:true,ocrLanguage:'en'}).id; }        // v2
     return DocumentApp.openById(id).getBody().getText();
@@ -1226,11 +1321,11 @@ function pdfText_(file){
   finally{ if(id){ try{ DriveApp.getFileById(id).setTrashed(true); }catch(e){} } }
 }
 /* Link a filed PDF on its row(s) + flag for confirm (same columns the Gmail auto-file uses). */
-function linkFiled_(X,rows,action,url){
+function linkFiled_(X,rows,action,url,flag){
   var names=action==='signed'?A.sgnPdf:action==='custpo'?A.poPdf:action==='invoice'?A.invPdf:A.poReqPdf;
   rows.forEach(function(r){ setCellByName_(X.sh,r,X.m,names,url);
-    if(action==='signed') setCellByName_(X.sh,r,X.m,A.inbox,'Signed PDF received — confirm');
-    if(action==='custpo') setCellByName_(X.sh,r,X.m,A.inbox,'Customer PO received — confirm'); });
+    if(action==='signed') setCellByName_(X.sh,r,X.m,A.inbox,flag||'Signed PDF received — confirm');
+    if(action==='custpo') setCellByName_(X.sh,r,X.m,A.inbox,flag||'Customer PO received — confirm'); });
 }
 function uniqueName_(folder,fname){
   if(!folder.getFilesByName(fname).hasNext()) return fname;
