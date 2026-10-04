@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.04-1 · built 2026-10-04 · Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.04-2 · built 2026-10-04 · Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.04-1', CODE_BUILT='2026-10-04';
+var CODE_VERSION='2026.10.04-2', CODE_BUILT='2026-10-04';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1029,6 +1029,8 @@ function scanInbox_(preview){
         if(Date.now()-T0>INBOX.TIME_BUDGET_MS){ timedOut=true; break; }
         var att=atts[ai], md5=md5Hex_(att.getBytes()), from=String(msg.getFrom()||'').replace(/.*</,'').replace('>','');
         var base=[key,'',new Date(),from,msg.getSubject()||'',att.getName()];
+        if(/@revolution-es\.com$/i.test(from) && !/^\s*(fwd?|fw)\s*:/i.test(msg.getSubject()||'')){   // our own outbound (invoices / packages we send) — a forward is still checked
+          if(!preview) logRows.push(base.concat(['skipped','sent by Revolution (not a forward)',md5])); skipped++; continue; }
         if(seen['md5:'+md5]){ logRows.push(base.concat(['skipped','same PDF already processed',md5])); skipped++; continue; }
         var v; try{ v=verifyInboxPdf_(X,att,msg,thSubj,md5); }catch(e){ v={d:'review',why:'error reading PDF: '+e}; }
         if(v.d==='file'){
@@ -1039,7 +1041,8 @@ function scanInbox_(preview){
           if(preview){ filed.push(fname+'  →  '+where+'   ['+v.why+']   (from '+from+')'); seen['md5:'+md5]=1; continue; }
           var folder=billingFolder_(root,p,v.action); fname=uniqueName_(folder,fname);
           var url=folder.createFile(att.copyBlob().setName(fname)).getUrl();
-          linkFiled_(X,v.rows,v.action,url,v.flag);
+          var already=v.rows.every(function(r){ return x_(cellVal_(X.vals[r],X.m,v.action==='signed'?A.signed:['po assigned']))==='Yes'; });
+          linkFiled_(X,v.rows,v.action,url,already?false:v.flag);                   // already marked → just link the PDF, no confirm flag
           filed.push(fname+'  →  '+where+'   ['+v.why+']');
           base[1]=fname; logRows.push(base.concat(['filed',v.why,md5])); seen['md5:'+md5]=1; lab='filed';
         } else if(v.d==='review'){
@@ -1075,15 +1078,37 @@ function verifyInboxPdf_(X,att,msg,thSubj,md5){
   var linked=function(r,names){ return !!String(cellVal_(X.vals[r],X.m,names)).trim(); };
   var fileMd5=function(url){ var m=String(url||'').match(/[-\w]{25,}/); if(!m) return ''; try{ return md5Hex_(DriveApp.getFileById(m[0]).getBlob().getBytes()); }catch(e){ return ''; } };
 
-  /* ---- Customer PO ---- */
+  /* ---- shared: customer PO numbers on the PDF ---- */
   var poNums=[], mm, rxPo=/\b(EWSO?)\s*-?\s*PO\s*-?\s*(\d{3,6})\b/g;
   while((mm=rxPo.exec(T))){ var pn=mm[1]+'-PO-'+mm[2]; if(poNums.indexOf(pn)<0) poNums.push(pn); }
   var saysPO=/PURCHASE\s*ORDER/.test(K);
+
+  /* ---- Signed invoice ---- */
+  if(/INVOICE/.test(K) && /\b5[01]\d{3}\b/.test(T) && !(saysPO && poNums.length && !/REVOLUTION\s*ENERGY/.test(K))){   // our invoice (even with its PO stapled behind it) is judged as an invoice
+    var invs=[], rxI=/\b(5[01]\d{3})\b/g; while((mm=rxI.exec(T))){ if(X.byInv[mm[1]]!=null && invs.indexOf(mm[1])<0) invs.push(mm[1]); }
+    if(!invs.length){ var any=T.match(/\b5[01]\d{3}\b/);
+      return /REVOLUTION\s*ENERGY/.test(K)&&any ? {d:'review',why:'Revolution invoice '+any[0]+' is not on the tracker'} : {d:'skip',why:'an invoice, but not one of ours'}; }
+    if(invs.length>1){ var lab=T.match(/INVOICE\s*(?:#|NO\.?|NUMBER)?\s*:?\s*(5[01]\d{3})\b/); invs=lab&&X.byInv[lab[1]]!=null?[lab[1]]:invs; }
+    if(invs.length>1) return {d:'review',why:'several tracker invoice #s on the PDF ('+invs.join(', ')+')'};
+    var inv=invs[0], r=X.byInv[inv];
+    if(!/REVOLUTION\s*ENERGY/.test(K) && !(amtOn(r) && opOn(r))) return {d:'review',why:'invoice '+inv+' found, but no Revolution letterhead and amount + operator don\'t both match'};   // older template: logo is an image
+    if(!amtOn(r) && !opOn(r)) return {d:'review',why:'invoice '+inv+': neither the amount nor the operator on the PDF matches the tracker'};
+    if(md5 && md5===fileMd5(cellVal_(X.vals[r],X.m,A.invPdf))) return {d:'skip',why:'our unsigned invoice '+inv+' sent back'};
+    if(linked(r,A.sgnPdf)){ if(fileMd5(cellVal_(X.vals[r],X.m,A.sgnPdf))===md5) return {d:'skip',why:'signed '+inv+' already linked'};
+      return {d:'review',why:'invoice '+inv+' already has a signed PDF linked'}; }
+    var ev=/\bSIGNED\b|\bSIGNATURE\b|\bAPPROVED\b|\bEXECUTED\b|\bSCAN|CAMSCANNER|\bIMG[_-]?\d/.test(ctx) ? 'email/file says signed'
+         : /DOCUSIGN|ENVELOPE ID|ADOBE SIGN|SIGNED BY|E-?SIGNED|DIGITALLY SIGNED/.test(K) ? 'e-signature on the PDF' : '';
+    if(!ev) return {d:'review',why:'invoice '+inv+' verified, but nothing says it was signed — open it and file it if it is'};
+    return {d:'file',action:'signed',rows:[r],inv:inv,why:'invoice '+inv+' ('+(amtOn(r)?'amount':'operator')+' matches; '+ev+')',
+            flag:'Signed PDF received — confirm'};
+  }
+  /* ---- Customer PO ---- */
   if(/\bPO\s*REQUEST\b/.test(K) && !poNums.length) return {d:'skip',why:'our own PO Request'};
   if(saysPO && poNums.length){
     if(poNums.length>1) return {d:'review',why:'several PO numbers on the PDF ('+poNums.join(', ')+')'};
-    var po=poNums[0], rows=porRows(T), how='PO Request # on the PO';
-    if(!rows.length && X.byCustPo[normId_(po)]){ rows=uniq(X.byCustPo[normId_(po)]); how='PO # already on the tracker'; }
+    var po=poNums[0], rows=[], how='';
+    if(X.byCustPo[normId_(po)]){ rows=uniq(X.byCustPo[normId_(po)]); how='PO # already on the tracker'; }   // the PO # itself beats any POR # printed on it
+    else { rows=porRows(T); how='PO Request # on the PO'; }
     if(!rows.length){ var hr=porRows(ctx);
       if(hr.length && hr.every(function(r){ return amtOn(r) && opOn(r); })){ rows=hr; how='email thread PO Request # + amount + operator match'; }
       else return {d:'review',why:po+' found but it doesn\'t tie to a job (no PO Request # on it'+(hr.length?'; thread\'s job amount/operator don\'t match':'')+')'}; }
@@ -1100,25 +1125,6 @@ function verifyInboxPdf_(X,att,msg,thSubj,md5){
             flag:'Customer PO '+po+' received'+(notes.length?' ('+notes.join('; ')+')':'')+' — confirm'};
   }
 
-  /* ---- Signed invoice ---- */
-  if(/INVOICE/.test(K)){
-    var invs=[], rxI=/\b(5[01]\d{3})\b/g; while((mm=rxI.exec(T))){ if(X.byInv[mm[1]]!=null && invs.indexOf(mm[1])<0) invs.push(mm[1]); }
-    if(!invs.length){ var any=T.match(/\b5[01]\d{3}\b/);
-      return /REVOLUTION\s*ENERGY/.test(K)&&any ? {d:'review',why:'Revolution invoice '+any[0]+' is not on the tracker'} : {d:'skip',why:'an invoice, but not one of ours'}; }
-    if(invs.length>1){ var lab=T.match(/INVOICE\s*(?:#|NO\.?|NUMBER)?\s*:?\s*(5[01]\d{3})\b/); invs=lab&&X.byInv[lab[1]]!=null?[lab[1]]:invs; }
-    if(invs.length>1) return {d:'review',why:'several tracker invoice #s on the PDF ('+invs.join(', ')+')'};
-    var inv=invs[0], r=X.byInv[inv];
-    if(!/REVOLUTION\s*ENERGY/.test(K)) return {d:'review',why:'invoice '+inv+' found, but it isn\'t on Revolution letterhead'};
-    if(!amtOn(r) && !opOn(r)) return {d:'review',why:'invoice '+inv+': neither the amount nor the operator on the PDF matches the tracker'};
-    if(md5 && md5===fileMd5(cellVal_(X.vals[r],X.m,A.invPdf))) return {d:'skip',why:'our unsigned invoice '+inv+' sent back'};
-    if(linked(r,A.sgnPdf)){ if(fileMd5(cellVal_(X.vals[r],X.m,A.sgnPdf))===md5) return {d:'skip',why:'signed '+inv+' already linked'};
-      return {d:'review',why:'invoice '+inv+' already has a signed PDF linked'}; }
-    var ev=/\bSIGNED\b|\bSIGNATURE\b|\bAPPROVED\b|\bEXECUTED\b|\bSCAN|CAMSCANNER|\bIMG[_-]?\d/.test(ctx) ? 'email/file says signed'
-         : /DOCUSIGN|ENVELOPE ID|ADOBE SIGN|SIGNED BY|E-?SIGNED|DIGITALLY SIGNED/.test(K) ? 'e-signature on the PDF' : '';
-    if(!ev) return {d:'review',why:'invoice '+inv+' verified, but nothing says it was signed — open it and file it if it is'};
-    return {d:'file',action:'signed',rows:[r],inv:inv,why:'invoice '+inv+' ('+(amtOn(r)?'amount':'operator')+' matches; '+ev+')',
-            flag:'Signed PDF received — confirm'};
-  }
   return {d:'skip',why:'not a customer PO or invoice'};
 }
 
@@ -1324,6 +1330,7 @@ function pdfTextBlob_(blob){
 function linkFiled_(X,rows,action,url,flag){
   var names=action==='signed'?A.sgnPdf:action==='custpo'?A.poPdf:action==='invoice'?A.invPdf:A.poReqPdf;
   rows.forEach(function(r){ setCellByName_(X.sh,r,X.m,names,url);
+    if(flag===false) return;
     if(action==='signed') setCellByName_(X.sh,r,X.m,A.inbox,flag||'Signed PDF received — confirm');
     if(action==='custpo') setCellByName_(X.sh,r,X.m,A.inbox,flag||'Customer PO received — confirm'); });
 }
