@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.04-2 · built 2026-10-04 · Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.04-3 · built 2026-10-04 · 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.04-2', CODE_BUILT='2026-10-04';
+var CODE_VERSION='2026.10.04-3', CODE_BUILT='2026-10-04';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1360,6 +1360,12 @@ function processDriveInbox_(preview){
     if(!res.rows.length){ stuck.push(name+'  ('+res.why+')');
       if(!preview){ try{ f.setDescription('Not filed: '+res.why+'. Rename it with the PO Request # or invoice #, or file it by hand.'); }catch(e){} }
       continue; }
+    var chk=inboxContentCheck_(X,f,res);                                        // open the PDF before trusting the name
+    if(chk.dup){ done.push(name+'  →  _Trash - Review   ['+chk.dup+']');
+      if(!preview){ f.moveTo(folderChild_(root,'_Trash - Review')); try{ f.setDescription('Moved from '+DRIVE_INBOX+': '+chk.dup); }catch(e){} }
+      continue; }
+    if(chk.hold){ stuck.push(name+'  ('+chk.hold+')'); if(!preview){ try{ f.setDescription('Not filed: '+chk.hold); }catch(e){} } continue; }
+    if(chk.action){ res.action=chk.action; res.why+='; '+chk.why; }
     var p=rowFields_(X,pickRow_(X,res.rows),{date:isoDay_(f.getDateCreated())});
     if(res.action==='signed') p.inv=res.inv||p.inv;
     if(res.action==='custpo' && res.po) p.po=res.po;
@@ -1376,6 +1382,31 @@ function processDriveInbox_(preview){
   if(stuck.length) out+='\n\nLeft in '+DRIVE_INBOX+' (no job match):\n • '+stuck.join('\n • ');
   return out+(preview?'\n\n(preview only — nothing changed)':'');
 }
+/* Content check for a dropped PDF (2026-10-04): the name alone once filed a copy of our own PO Request as the
+   customer's Approved PO (EWS-POR-000037). → {dup:reason} same bytes as a document already linked on the row,
+   {hold:reason} leave it in the Inbox, {action,why} re-classified from the text, or {} to file as named. */
+function inboxContentCheck_(X,f,res){
+  var md5=''; try{ md5=md5Hex_(f.getBlob().getBytes()); }catch(e){}
+  var same=function(names){ return md5 && res.rows.some(function(r){ return md5OfUrl_(cellVal_(X.vals[r],X.m,names))===md5; }); };
+  if(res.action==='custpo' || res.action==='po'){
+    var K=String(pdfText_(f)||'').toUpperCase().replace(/\s+/g,' ').replace(/0/g,'O');
+    var T=K.replace(/O/g,'0'), hasPo=/\bEWS0?\s*-?\s*P0\s*-?\s*\d{3,6}\b/.test(T);
+    if(res.action==='custpo' && /\bPO\s*REQUEST\b/.test(K) && !hasPo){ res.action='po'; var re={action:'po',why:'PDF is our PO Request, not a customer PO'}; }
+    if(res.action==='po'){
+      if(same(A.poReqPdf)) return {dup:'identical to the PO Request already filed'};
+      if(res.rows.some(function(r){ return !!cellVal_(X.vals[r],X.m,A.poReqPdf).trim(); })) return {hold:'a PO Request copy, and the row already has a PO Request PDF'};
+      return re||{};
+    }
+    if(same(A.poPdf)) return {dup:'identical to the approved PO already filed'};
+    return {};
+  }
+  if(res.action==='signed'){
+    if(same(A.invPdf)) return {dup:'identical to our unsigned invoice — not a signed copy'};
+    if(same(A.sgnPdf)) return {dup:'identical to the signed invoice already filed'};
+  }
+  return {};
+}
+function md5OfUrl_(url){ var m=String(url||'').match(/[-\w]{25,}/); if(!m) return ''; try{ return md5Hex_(DriveApp.getFileById(m[0]).getBlob().getBytes()); }catch(e){ return ''; } }
 /* Decide job row(s) + step for one dropped PDF. Name first; PDF text only when the name isn't enough. */
 function classifyInboxPdf_(X,f,name){
   var ps=parseScheme_(name);
