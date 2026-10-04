@@ -185,6 +185,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
 .doc-a{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--info);text-decoration:none;font-weight:600}
 .doc-a:hover{border-color:var(--info);background:var(--info-bg)}
 .doc-none{font-size:11px;color:var(--muted)}
+.doc-miss{color:var(--muted);border-style:dashed;background:transparent;font-weight:500;cursor:default}
 /* --- Needs Attention: chevron + inline expand --- */
 .na-item{border-bottom:1px solid var(--line-2)} .na-item:last-child{border-bottom:none}
 .na-chev{color:var(--muted-2);font-size:11px;transition:transform .15s;display:inline-block} .na-item.open .na-chev{transform:rotate(90deg)}
@@ -692,7 +693,7 @@ const SAMPLE = [
   ["50425","2026-02-24",1462.50,"No","","No","","EQT - Big 177 - Roustabout - Fleet # 13"],
   ["50426","2026-02-26",6050.00,"Yes","","No","","EQT - Teamwork - Rig Down - Fleet # 13"]
 ];
-const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl","poPdf","sgnPdf","start","end","draft"];
+const COLS = ["inv","date","amount","signed","poReq","poAssigned","reminderSent","notes","paid","po","invoiceStatus","lineItems","unit","operator","location","disc","fleet","contactName","contactEmail","contactPhone","paidDate","sentDate","pdfUrl","poPdf","sgnPdf","start","end","draft","poReqPdf","invPdf"];
 const TODAY = (function(){ var d=new Date(); d.setHours(0,0,0,0); return d; })();   // live "today" (local midnight): Days Outstanding = today − Invoice Date (from the Billing Tracker)
 const REMIND_DAYS = 7;   // remind on invoices still open this many days after being sent for signature
 let DATA = { rows: [] };
@@ -1391,11 +1392,14 @@ var naOpen={}, trackOpen={}, pipeOpen={}, chaseOpen={};
 function billToName(u){ return u==="755"?"Evolution Well Services":"EWS Operating LLC"; }
 function docLinks(x){
   var a=function(u,l){ return '<a class="doc-a" href="'+esc(u)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>'+l+'</a>'; };
-  var L=[];
-  if(x.pdfUrl) L.push(a(x.pdfUrl, x.inv?('Invoice '+esc(x.inv)):'PO Request'));
-  if(x.poPdf)  L.push(a(x.poPdf,'Approved PO'));
-  if(x.sgnPdf) L.push(a(x.sgnPdf,'Signed invoice'));
-  return L.length? L.join(''):'<span class="doc-none">No PDF on file yet</span>';
+  var miss=function(l){ return '<span class="doc-a doc-miss" title="Not on file yet">'+l+'</span>'; };
+  var req=x.poReqPdf||(!x.inv&&!x.invPdf?x.pdfUrl:''), inv=x.invPdf||(x.inv?x.pdfUrl:'');   // older backends only sent pdfUrl
+  var L=[];                                                                             // always the same four slots, in job order
+  if(x.poReq||req) L.push(req?a(req,'PO Request'):miss('PO Request'));
+  L.push(x.poPdf?a(x.poPdf,'Approved PO'+(x.po?' '+esc(x.po):'')):miss('Approved PO'));
+  L.push(inv?a(inv,'Invoice'+(x.inv?' '+esc(x.inv):'')):miss('Invoice'+(x.inv?' '+esc(x.inv):'')));
+  L.push(x.sgnPdf?a(x.sgnPdf,'Signed invoice'):miss('Signed invoice'));
+  return L.join('');
 }
 function btnOpen(id){ return '<button class="btn sm" onclick="event.stopPropagation();openRecord('+id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>Open in builder</button>'; }
 function btnRem(id){ return '<button class="btn sm" onclick="event.stopPropagation();reminder('+id+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M4 4h16v16H4z"/><path d="m4 6 8 6 8-6"/></svg>Reminder</button>'; }

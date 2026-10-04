@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.04-3 · built 2026-10-04 · 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.04-4 · built 2026-10-04 · summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.04-3', CODE_BUILT='2026-10-04';
+var CODE_VERSION='2026.10.04-4', CODE_BUILT='2026-10-04';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -285,7 +285,7 @@ function summaryRow_(v,ci,name,rowNum,dd){ dd=dd||{};
         fleet:String(g_(v,ci.fleet)||''),
         contactName:String(g_(v,ci.cName)||''), contactEmail:String(g_(v,ci.cEmail)||''), contactPhone:String(g_(v,ci.cPhone)||''),
         terms:String(g_(v,ci.terms)||''), paidDate:(dd.paidDate||fmtDate_(g_(v,ci.paidDate))), sentDate:(dd.sentDate||fmtDate_(g_(v,ci.sentDate))),
-        pdfUrl:String(g_(v,ci.invPdf)||g_(v,ci.poReqPdf)||''),
+        pdfUrl:String(g_(v,ci.invPdf)||g_(v,ci.poReqPdf)||''), poReqPdf:String(g_(v,ci.poReqPdf)||''), invPdf:String(g_(v,ci.invPdf)||''),
         poPdf:String(g_(v,ci.poPdf)||''), sgnPdf:String(g_(v,ci.sgnPdf)||''), inboxFlag:String(g_(v,ci.inbox)||''), draft:x_(g_(v,ci.draft)),
         lineItems:pk.lines, notes:(pk.notes || String(g_(v,ci.notes)||'')),
         _tab:name, _row:rowNum };
@@ -1084,11 +1084,11 @@ function verifyInboxPdf_(X,att,msg,thSubj,md5){
   var saysPO=/PURCHASE\s*ORDER/.test(K);
 
   /* ---- Signed invoice ---- */
-  if(/INVOICE/.test(K) && /\b5[01]\d{3}\b/.test(T) && !(saysPO && poNums.length && !/REVOLUTION\s*ENERGY/.test(K))){   // our invoice (even with its PO stapled behind it) is judged as an invoice
-    var invs=[], rxI=/\b(5[01]\d{3})\b/g; while((mm=rxI.exec(T))){ if(X.byInv[mm[1]]!=null && invs.indexOf(mm[1])<0) invs.push(mm[1]); }
-    if(!invs.length){ var any=T.match(/\b5[01]\d{3}\b/);
-      return /REVOLUTION\s*ENERGY/.test(K)&&any ? {d:'review',why:'Revolution invoice '+any[0]+' is not on the tracker'} : {d:'skip',why:'an invoice, but not one of ours'}; }
-    if(invs.length>1){ var lab=T.match(/INVOICE\s*(?:#|NO\.?|NUMBER)?\s*:?\s*(5[01]\d{3})\b/); invs=lab&&X.byInv[lab[1]]!=null?[lab[1]]:invs; }
+  if(/INVOICE/.test(K) && /\b5[01]\d{3,4}\b/.test(T) && !(saysPO && poNums.length && !/REVOLUTION\s*ENERGY/.test(K))){   // our invoice (even with its PO stapled behind it) is judged as an invoice
+    var invs=[], rxI=/\b(5[01]\d{3,4})\b/g; while((mm=rxI.exec(T))){ if(X.byInv[mm[1]]!=null && invs.indexOf(mm[1])<0) invs.push(mm[1]); }
+    if(!invs.length){ var any=T.match(/\b5[01]\d{3,4}\b/);
+      return /REVOLUTION\s*ENERGY/.test(K)&&any ? {d:'review',why:'Revolution invoice '+any[0]+' is not on the tracker'} : {d:'skip',why:'an invoice with no Revolution invoice # on it'}; }
+    if(invs.length>1){ var lab=T.match(/INVOICE\s*(?:#|NO\.?|NUMBER)?\s*:?\s*(5[01]\d{3,4})\b/); invs=lab&&X.byInv[lab[1]]!=null?[lab[1]]:invs; }
     if(invs.length>1) return {d:'review',why:'several tracker invoice #s on the PDF ('+invs.join(', ')+')'};
     var inv=invs[0], r=X.byInv[inv];
     if(!/REVOLUTION\s*ENERGY/.test(K) && !(amtOn(r) && opOn(r))) return {d:'review',why:'invoice '+inv+' found, but no Revolution letterhead and amount + operator don\'t both match'};   // older template: logo is an image
@@ -1125,7 +1125,7 @@ function verifyInboxPdf_(X,att,msg,thSubj,md5){
             flag:'Customer PO '+po+' received'+(notes.length?' ('+notes.join('; ')+')':'')+' — confirm'};
   }
 
-  return {d:'skip',why:'not a customer PO or invoice'};
+  return {d:'skip',why:'neither a customer PO nor one of our invoices'};
 }
 
 function md5Hex_(bytes){ return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,bytes).map(function(b){ return ('0'+(b&255).toString(16)).slice(-2); }).join(''); }
@@ -1146,6 +1146,7 @@ function inboxLogSheet_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB)||ss.insertS
 function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
   sh.getRange(2,1,sh.getLastRow()-1,Math.max(9,Math.min(sh.getLastColumn(),9))).getValues().forEach(function(r){
     if(r[0]) map[String(r[0])]=1;
+    if(/^(an invoice, but not one of ours|not a customer PO or invoice)$/.test(String(r[7]))){ delete map[String(r[0])]; return; }   // judged before 6-digit invoice #s were recognised (2026-10-04) → look again
     if(r[8] && /^(filed|skipped)$/.test(String(r[6]))) map['md5:'+r[8]]=1; });   // same PDF in another email → don't redo it
   return map; }
 function inboxLog_(ss,rows){ if(!rows.length) return; var sh=inboxLogSheet_(ss);
@@ -1413,7 +1414,7 @@ function classifyInboxPdf_(X,f,name){
   function find(text){
     var o={por:[],inv:[],cp:[]}, s=String(text||''), mm, rx=/EWSO?\s*-?\s*POR\s*-?\s*(?:[A-Z]{2}\s*-?\s*)?\d+/gi;
     while((mm=rx.exec(s))){ var k=porNorm_(mm[0]); if(X.byPoReq[k]) o.por=o.por.concat(X.byPoReq[k]); }
-    var rxi=/\b(5[01]\d{3})\b/g; while((mm=rxi.exec(s))){ if(X.byInv[mm[1]]!=null && o.inv.indexOf(mm[1])<0) o.inv.push(mm[1]); }
+    var rxi=/\b(5[01]\d{3,4})\b/g; while((mm=rxi.exec(s))){ if(X.byInv[mm[1]]!=null && o.inv.indexOf(mm[1])<0) o.inv.push(mm[1]); }
     var ns=normId_(s); X.custPoKeys.forEach(function(k){ if(k.length>=5 && ns.indexOf(k)>=0) o.cp.push(k); });
     return o;
   }
