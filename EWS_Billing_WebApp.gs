@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.04-4 · built 2026-10-04 · summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.04-5 · built 2026-10-04 · a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.04-4', CODE_BUILT='2026-10-04';
+var CODE_VERSION='2026.10.04-5', CODE_BUILT='2026-10-04';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1097,8 +1097,9 @@ function verifyInboxPdf_(X,att,msg,thSubj,md5){
     if(linked(r,A.sgnPdf)){ if(fileMd5(cellVal_(X.vals[r],X.m,A.sgnPdf))===md5) return {d:'skip',why:'signed '+inv+' already linked'};
       return {d:'review',why:'invoice '+inv+' already has a signed PDF linked'}; }
     var ev=/\bSIGNED\b|\bSIGNATURE\b|\bAPPROVED\b|\bEXECUTED\b|\bSCAN|CAMSCANNER|\bIMG[_-]?\d/.test(ctx) ? 'email/file says signed'
-         : /DOCUSIGN|ENVELOPE ID|ADOBE SIGN|SIGNED BY|E-?SIGNED|DIGITALLY SIGNED/.test(K) ? 'e-signature on the PDF' : '';
-    if(!ev) return {d:'review',why:'invoice '+inv+' verified, but nothing says it was signed — open it and file it if it is'};
+         : /DOCUSIGN|ENVELOPE ID|ADOBE SIGN|SIGNED BY|E-?SIGNED|DIGITALLY SIGNED/.test(K) ? 'e-signature on the PDF'
+         : /SIGN,?\s*DATE,?\s*(AND|&)\s*REPLY/.test(ctx) && !/@REVOLUTION-ES\.COM/.test(String(msg.getFrom()||'').toUpperCase()) ? 'customer replied to our sign-and-return request' : '';
+    if(!ev) return {d:'review',why:'invoice '+inv+' verified, but nothing says it was signed (no signed/approved/scan wording, not a reply to our sign request)'};
     return {d:'file',action:'signed',rows:[r],inv:inv,why:'invoice '+inv+' ('+(amtOn(r)?'amount':'operator')+' matches; '+ev+')',
             flag:'Signed PDF received — confirm'};
   }
@@ -1146,7 +1147,7 @@ function inboxLogSheet_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB)||ss.insertS
 function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
   sh.getRange(2,1,sh.getLastRow()-1,Math.max(9,Math.min(sh.getLastColumn(),9))).getValues().forEach(function(r){
     if(r[0]) map[String(r[0])]=1;
-    if(/^(an invoice, but not one of ours|not a customer PO or invoice)$/.test(String(r[7]))){ delete map[String(r[0])]; return; }   // judged before 6-digit invoice #s were recognised (2026-10-04) → look again
+    if(/^(an invoice, but not one of ours|not a customer PO or invoice)$|nothing says it was signed — open it/.test(String(r[7]))){ delete map[String(r[0])]; return; }   // judged before 6-digit invoice #s were recognised (2026-10-04) → look again
     if(r[8] && /^(filed|skipped)$/.test(String(r[6]))) map['md5:'+r[8]]=1; });   // same PDF in another email → don't redo it
   return map; }
 function inboxLog_(ss,rows){ if(!rows.length) return; var sh=inboxLogSheet_(ss);
