@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.04-5 · built 2026-10-04 · a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.04-6 · built 2026-10-04 · emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.04-5', CODE_BUILT='2026-10-04';
+var CODE_VERSION='2026.10.04-6', CODE_BUILT='2026-10-04';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1146,7 +1146,7 @@ function inboxLogSheet_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB)||ss.insertS
   return sh; }
 function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
   sh.getRange(2,1,sh.getLastRow()-1,Math.max(9,Math.min(sh.getLastColumn(),9))).getValues().forEach(function(r){
-    if(r[0]) map[String(r[0])]=1;
+    if(r[0] && !(String(r[0]).indexOf('#')<0 && !String(r[6]||'').trim())) map[String(r[0])]=1;   // entries from the old subject-only scanner (bare message id, no decision) get re-verified
     if(/^(an invoice, but not one of ours|not a customer PO or invoice)$|nothing says it was signed — open it/.test(String(r[7]))){ delete map[String(r[0])]; return; }   // judged before 6-digit invoice #s were recognised (2026-10-04) → look again
     if(r[8] && /^(filed|skipped)$/.test(String(r[6]))) map['md5:'+r[8]]=1; });   // same PDF in another email → don't redo it
   return map; }
