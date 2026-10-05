@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.04-7 · built 2026-10-04 · a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.04-8 · built 2026-10-04 · Morgan's AP submission emails (to accountspayableEWS, cc Chad, invoice # + PO #) auto-mark Signed invoices Paid; a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.04-7', CODE_BUILT='2026-10-04';
+var CODE_VERSION='2026.10.04-8', CODE_BUILT='2026-10-04';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -1001,8 +1001,8 @@ function apDays_(d,today){ if(!d) return 0; var dd=(d instanceof Date)?d:new Dat
  *   Run ▸ scanInbox          → for real.
  *   Run ▸ installInboxScan   → every EVERY_HOURS hour(s).      Run ▸ removeInboxScan → stop.
  *************************************************************************************************/
-function inboxScanPreview(){ var r=scanInbox_(true); Logger.log(r); return r; }
-function scanInbox(){ var r=scanInbox_(false); Logger.log(r); return r; }
+function inboxScanPreview(){ var r=scanInbox_(true)+'\n\n'+apPaidSafe_(true); Logger.log(r); return r; }
+function scanInbox(){ var r=scanInbox_(false)+'\n\n'+apPaidSafe_(false); Logger.log(r); return r; }
 function installInboxScan(){
   removeInboxScan();
   ScriptApp.newTrigger('scanInbox').timeBased().everyHours(INBOX.EVERY_HOURS).create();
@@ -1059,6 +1059,79 @@ function scanInbox_(preview){
   out+='\n\nSkipped '+skipped+' (not a customer PO / signed invoice, or already processed).';
   if(timedOut) out+='\n⏱ Stopped at the time limit — the next run continues.';
   return out+(preview?'\n\n(preview only — nothing written)':'');
+}
+
+/*************************************************************************************************
+ * AP SUBMISSION → MARK PAID  (runs inside scanInbox, same hourly trigger)
+ *   Morgan emails accountspayableEWS@evolutionws.com, cc Chad, with "signed invoice ##### and its
+ *   corresponding PO EWS-PO-####" → that invoice is marked Paid (Paid = Yes, Status = Paid, Paid Date =
+ *   email date if blank).
+ *   Only touches a row that is in the Pipeline's "Signed · Awaiting payment" column (Signed = Yes, Paid ≠ Yes)
+ *   AND whose PO # matches a PO # in the same email. Anything else → Inbox Log "needs review", nothing written.
+ *   Run ▸ apPaidPreview → what it WOULD mark, writes nothing.
+ *************************************************************************************************/
+var AP_PAID = {
+  FROM: 'mpuskarich@revolution-es.com',
+  TO:   'accountspayableEWS@evolutionws.com',
+  CC:   'cfacchine@revolution-es.com',
+  LOOKBACK_DAYS: 21
+};
+function apPaidPreview(){ var r=scanApPaid_(true); Logger.log(r); return r; }
+function apSeen_(ss){                                               // done = marked paid / skipped; a 'needs review' is re-checked every run (logged once)
+  var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
+  sh.getRange(2,1,sh.getLastRow()-1,8).getValues().forEach(function(r){ var k=String(r[0]); if(k.indexOf('ap:')!==0) return;
+    if(/^(marked paid|skipped)$/.test(String(r[6]))) map[k]=1; map[k+'|'+String(r[7])]=1; });
+  return map; }
+function apPaidSafe_(preview){ try{ return scanApPaid_(preview); }catch(e){ return 'AP → Paid check failed: '+e; } }
+function apPaidParse_(text){                                          // → {invs:[], pos:[]} from subject + body (quoted reply cut off)
+  var T=String(text||'').toUpperCase(), pos=[], invs=[], m;
+  var rxPo=/\b(EWSO?)\s*-?\s*PO\s*-?\s*(\d{3,6})\b/g;
+  while((m=rxPo.exec(T))){ var pn=m[1]+'-PO-'+m[2]; if(pos.indexOf(pn)<0) pos.push(pn); }
+  var noPo=T.replace(/\bEWSO?\s*-?\s*PO\s*-?\s*\d{3,6}\b/g,' ').replace(/\bEWSO?\s*-?\s*POR\s*-?\s*(?:[A-Z]{2}\s*-?\s*)?\d+/g,' ');
+  var rxI=/\b(5[01]\d{3,4})\b/g; while((m=rxI.exec(noPo))){ if(invs.indexOf(m[1])<0) invs.push(m[1]); }
+  return {invs:invs,pos:pos};
+}
+function scanApPaid_(preview){
+  var X=trackerIndex_(); if(!X) return 'AP → Paid: Billing Tracker tab not found.';
+  var seen=apSeen_(X.ss), done=[], review=[], logRows=[], wrote=false;
+  var q='from:'+AP_PAID.FROM+' to:'+AP_PAID.TO+' cc:'+AP_PAID.CC+' newer_than:'+AP_PAID.LOOKBACK_DAYS+'d -in:trash -in:spam';
+  var threads=GmailApp.search(q,0,50);
+  threads.forEach(function(th){ th.getMessages().forEach(function(msg){
+    var from=String(msg.getFrom()||'').replace(/.*</,'').replace('>','').toLowerCase();
+    if(from!==AP_PAID.FROM.toLowerCase()) return;
+    var hdr=(String(msg.getTo()||'')+' '+String(msg.getCc()||'')).toLowerCase();
+    if(hdr.indexOf(AP_PAID.TO.toLowerCase())<0 || hdr.indexOf(AP_PAID.CC.toLowerCase())<0) return;
+    var key='ap:'+msg.getId(); if(seen[key]) return;
+    var subj=msg.getSubject()||'', body=String(msg.getPlainBody()||'').split(/\n\s*On .{5,200}wrote:|\n-{2,}\s*Forwarded message|\nFrom:\s/)[0];
+    var P=apPaidParse_(subj+'\n'+body), when=isoDay_(msg.getDate());
+    var base=[key,'',new Date(),from,subj,''], res=[];
+    if(!P.invs.length || !P.pos.length){ res.push(['needs review','AP email: '+(!P.invs.length?'no invoice #':'no PO #')+' found']); }
+    P.invs.forEach(function(inv){
+      var r=X.byInv[inv];
+      if(r==null){ res.push(['needs review','AP email: invoice '+inv+' not on the Billing Tracker tab']); return; }
+      var rowPo=normId_(cellVal_(X.vals[r],X.m,A.po)).replace(/\D/g,''), poHit=P.pos.filter(function(p){ return p.replace(/\D/g,'')===rowPo; })[0];
+      var paid=paid_(cellVal_(X.vals[r],X.m,A.paid))==='Yes' || /paid|collected/i.test(cellVal_(X.vals[r],X.m,A.status));
+      var signed=x_(cellVal_(X.vals[r],X.m,A.signed))==='Yes';
+      if(paid){ res.push(['skipped','AP email: invoice '+inv+' already paid']); return; }
+      if(!rowPo || !poHit){ res.push(['needs review','AP email: invoice '+inv+' PO on row is '+(rowPo?cellVal_(X.vals[r],X.m,A.po):'blank')+', email says '+P.pos.join(', ')]); return; }
+      if(!signed){ res.push(['needs review','AP email: invoice '+inv+' ('+poHit+') is not marked Signed — mark signed first']); return; }
+      if(!preview){
+        var row=r+1, c;
+        if((c=col_(X.m,A.paid))>=0) X.sh.getRange(row,c+1).setValue('Yes');
+        if((c=col_(X.m,A.status))>=0) X.sh.getRange(row,c+1).setValue('Paid');
+        if((c=col_(X.m,A.paidDate))>=0 && !String(X.vals[r][c]||'').trim() && when) X.sh.getRange(row,c+1).setValue(when);
+        wrote=true; }
+      res.push(['marked paid','AP email '+when+': invoice '+inv+' + '+poHit+' match (was Signed · Awaiting payment)']);
+    });
+    res.forEach(function(x){
+      if(x[0]==='marked paid') done.push(x[1]); else if(x[0]==='needs review') review.push(x[1]+'  ("'+subj+'")');
+      if(!preview){ var k=x[0]==='needs review'?key+'#review':key; if(!seen[k+'|'+x[1]]) logRows.push([k].concat(base.slice(1),[x[0],x[1],''])); }
+    });
+  }); });
+  if(!preview){ inboxLog_(X.ss,logRows); if(wrote) bustCache_(); }
+  var out='AP → Paid: '+(preview?'WOULD mark ':'marked ')+done.length+' invoice(s) paid'+(done.length?':\n • '+done.join('\n • '):'.');
+  if(review.length) out+='\nNeeds review ('+review.length+'), nothing written:\n • '+review.join('\n • ');
+  return out+(preview?'\n(preview only — nothing written)':'');
 }
 
 /* Decide what one PDF attachment is. → {d:'file'|'review'|'skip', action, rows, inv, po, flag, why} */
