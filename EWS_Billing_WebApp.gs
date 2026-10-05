@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.04-8 · built 2026-10-04 · Morgan's AP submission emails (to accountspayableEWS, cc Chad, invoice # + PO #) auto-mark Signed invoices Paid; a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.05-1 · built 2026-10-05 · Gmail auto-file labels use the Billing labels (filed → Billing/History, needs review → Billing/Customer Replies) and PO Request drafts + sent get Billing/PO Requests; a customer reply whose PDF doesn't read as our invoice but whose subject / file name names a tracker invoice goes to review instead of being skipped (51334 signed return); Morgan's AP submission emails (to accountspayableEWS, cc Chad, invoice # + PO #) auto-mark Signed invoices Paid; a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.04-8', CODE_BUILT='2026-10-04';
+var CODE_VERSION='2026.10.05-1', CODE_BUILT='2026-10-05';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -45,8 +45,9 @@ var INBOX = {
   EVERY_HOURS: 1,                         // trigger interval once installInboxScan has been run
   MAX_THREADS: 60,                        // threads per run (newest first)
   TIME_BUDGET_MS: 270000,                 // stop well inside the 6-min limit; the next run picks up the rest
-  LABEL_FILED: 'EWS Billing/Auto-filed',
-  LABEL_REVIEW: 'EWS Billing/Needs review'
+  LABEL_FILED: 'Billing/History',          // thread had a PDF filed to Drive + linked on the tracker   (was "EWS Billing/Auto-filed")
+  LABEL_REVIEW: 'Billing/Customer Replies', // thread has a PDF it couldn't confirm — open it yourself  (was "EWS Billing/Needs review")
+  LABEL_POREQ: 'Billing/PO Requests'        // our own PO Request emails (drafts + sent), labelled each run
 };
 
 /* Email CC lists — one "Email Lists" tab controls who is CC'd on each document type. These defaults seed
@@ -1001,8 +1002,26 @@ function apDays_(d,today){ if(!d) return 0; var dd=(d instanceof Date)?d:new Dat
  *   Run ▸ scanInbox          → for real.
  *   Run ▸ installInboxScan   → every EVERY_HOURS hour(s).      Run ▸ removeInboxScan → stop.
  *************************************************************************************************/
-function inboxScanPreview(){ var r=scanInbox_(true)+'\n\n'+apPaidSafe_(true); Logger.log(r); return r; }
-function scanInbox(){ var r=scanInbox_(false)+'\n\n'+apPaidSafe_(false); Logger.log(r); return r; }
+function inboxScanPreview(){ var r=scanInbox_(true)+'\n\n'+apPaidSafe_(true)+'\n\n'+poReqLabelSafe_(true); Logger.log(r); return r; }
+function scanInbox(){ var r=scanInbox_(false)+'\n\n'+apPaidSafe_(false)+'\n\n'+poReqLabelSafe_(false); Logger.log(r); return r; }
+
+/* PO Request label (2026.10.05-1): every run puts "Billing/PO Requests" on our own PO Request emails — the drafts the
+   platform's Email button creates, and sent ones from the last LOOKBACK_DAYS — so they're grouped before you send them.
+   Matches the platform's subject: "… - PO Request # EWS-POR-…". Labels only; never edits, sends or deletes.
+   Run ▸ labelPoRequests to do it right now instead of waiting for the hourly run. */
+function labelPoRequests(){ var r=poReqLabelSafe_(false); Logger.log(r); return r; }
+function poReqLabelSafe_(preview){ try{ return labelPoRequests_(preview); }catch(e){ return 'PO Request label failed: '+e; } }
+function labelPoRequests_(preview){
+  var isPor=function(s){ return /PO\s*Request\s*#\s*EWSO?\s*-?\s*POR/i.test(String(s||'')); };
+  var lab=preview?null:gmailLabel_(INBOX.LABEL_POREQ), done={}, n=0;
+  var tag=function(th){ var id=th.getId(); if(done[id]) return; done[id]=1;
+    if(th.getLabels().some(function(l){ return l.getName()===INBOX.LABEL_POREQ; })) return;
+    if(!preview) th.addLabel(lab); n++; };
+  GmailApp.getDrafts().forEach(function(d){ var m=d.getMessage(); if(m && isPor(m.getSubject())) tag(m.getThread()); });
+  GmailApp.search('in:sent subject:"PO Request" newer_than:'+INBOX.LOOKBACK_DAYS+'d',0,100).forEach(function(th){
+    if(isPor(th.getFirstMessageSubject())) tag(th); });
+  return 'PO Requests: '+(preview?'WOULD label ':'labelled ')+n+' thread(s) "'+INBOX.LABEL_POREQ+'".';
+}
 function installInboxScan(){
   removeInboxScan();
   ScriptApp.newTrigger('scanInbox').timeBased().everyHours(INBOX.EVERY_HOURS).create();
@@ -1159,11 +1178,27 @@ function verifyInboxPdf_(X,att,msg,thSubj,md5){
   var poFirst=saysPO && poNums.length && T.indexOf('PURCHASE ORDER')>=0 && (T.indexOf('INVOICE')<0 || T.indexOf('PURCHASE ORDER')<T.indexOf('INVOICE'));
   var isPoDoc=poNums.length && (poNamed || poFirst);                   // a PO that merely quotes our invoice/estimate # ("referenced estimate 50500") is a PO, not an invoice
 
+  /* Safety net (2026.10.05-1): the PDF text didn't read as our invoice or a customer PO (phone scan, photo, logo-only
+     page), but a CUSTOMER's email subject / file name names one of our tracker invoices. Never drop that silently:
+     already signed → skip; otherwise → Needs review (Billing/Customer Replies). Before this, signed returns such as
+     "Signed EWS-POR-00025 - 3 INV 51334" were logged as "neither a customer PO nor one of our invoices" and skipped. */
+  var ctxGuess=function(){
+    if(/@REVOLUTION-ES\.COM/.test(String(msg.getFrom()||'').toUpperCase())) return null;
+    var head=(thSubj+' '+(msg.getSubject()||'')+' '+att.getName()).toUpperCase().replace(/\bEWSO?\s*-?\s*PO\s*-?\s*\d{3,6}\b/g,' ');
+    var hits=[], m2, rx2=/\b(5[01]\d{3,4})\b/g; while((m2=rx2.exec(head))){ if(X.byInv[m2[1]]!=null && hits.indexOf(m2[1])<0) hits.push(m2[1]); }
+    if(!hits.length) return null;
+    if(hits.length>1) return {d:'review',why:'PDF text didn\'t read as our invoice; the email names several invoices ('+hits.join(', ')+') — open it'};
+    var ci=hits[0], cr=X.byInv[ci];
+    if(md5 && md5===fileMd5(cellVal_(X.vals[cr],X.m,A.invPdf))) return {d:'skip',why:'our unsigned invoice '+ci+' sent back'};
+    if(x_(cellVal_(X.vals[cr],X.m,A.signed))==='Yes' || linked(cr,A.sgnPdf)) return {d:'skip',why:'email is about invoice '+ci+', which is already signed (PDF text didn\'t read as our invoice)'};
+    return {d:'review',why:'email is about invoice '+ci+' but the PDF text didn\'t read as our invoice (scan / photo?) — open it; if it\'s the signed copy, Mark signed'};
+  };
+
   /* ---- Signed invoice ---- */
   if(!isPoDoc && /INVOICE/.test(K) && /\b5[01]\d{3,4}\b/.test(T) && !(saysPO && poNums.length && !/REVOLUTION\s*ENERGY/.test(K))){   // our invoice (even with its PO stapled behind it) is judged as an invoice
     var invs=[], rxI=/\b(5[01]\d{3,4})\b/g; while((mm=rxI.exec(T))){ if(X.byInv[mm[1]]!=null && invs.indexOf(mm[1])<0) invs.push(mm[1]); }
     if(!invs.length){ var any=T.match(/\b5[01]\d{3,4}\b/);
-      return /REVOLUTION\s*ENERGY/.test(K)&&any ? {d:'review',why:'Revolution invoice '+any[0]+' is not on the tracker'} : {d:'skip',why:'an invoice with no Revolution invoice # on it'}; }
+      return /REVOLUTION\s*ENERGY/.test(K)&&any ? {d:'review',why:'Revolution invoice '+any[0]+' is not on the tracker'} : (ctxGuess()||{d:'skip',why:'an invoice, but no tracker invoice # on it or in the email subject / file name'}); }
     if(invs.length>1){ var lab=T.match(/INVOICE\s*(?:#|NO\.?|NUMBER)?\s*:?\s*(5[01]\d{3,4})\b/); invs=lab&&X.byInv[lab[1]]!=null?[lab[1]]:invs; }
     if(invs.length>1) return {d:'review',why:'several tracker invoice #s on the PDF ('+invs.join(', ')+')'};
     var inv=invs[0], r=X.byInv[inv];
@@ -1202,7 +1237,7 @@ function verifyInboxPdf_(X,att,msg,thSubj,md5){
             flag:'Customer PO '+po+' received'+(notes.length?' ('+notes.join('; ')+')':'')+' — confirm'};
   }
 
-  return {d:'skip',why:'neither a customer PO nor one of our invoices'};
+  return ctxGuess()||{d:'skip',why:'not a customer PO or one of our invoices (checked the PDF, email subject and file name)'};
 }
 
 function md5Hex_(bytes){ return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,bytes).map(function(b){ return ('0'+(b&255).toString(16)).slice(-2); }).join(''); }
@@ -1223,7 +1258,7 @@ function inboxLogSheet_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB)||ss.insertS
 function inboxSeen_(ss){ var sh=ss.getSheetByName(INBOX.LOG_TAB), map={}; if(!sh||sh.getLastRow()<2) return map;
   sh.getRange(2,1,sh.getLastRow()-1,Math.max(9,Math.min(sh.getLastColumn(),9))).getValues().forEach(function(r){
     if(r[0] && !(String(r[0]).indexOf('#')<0 && !String(r[6]||'').trim())) map[String(r[0])]=1;   // entries from the old subject-only scanner (bare message id, no decision) get re-verified
-    if(/^(an invoice, but not one of ours|not a customer PO or invoice)$|nothing says it was signed — open it|is not on the tracker and doesn/.test(String(r[7])) ||
+    if(/^(an invoice, but not one of ours|not a customer PO or invoice|neither a customer PO nor one of our invoices|an invoice with no Revolution invoice # on it)$|nothing says it was signed — open it|is not on the tracker and doesn/.test(String(r[7])) ||   // last two: skipped before the 2026.10.05-1 subject/file-name safety net → look once more
        (/already has a signed PDF linked/.test(String(r[7])) && /(^|[^A-Z])PO[\s_-]*EWSO?[\s_-]*PO[\s_-]*\d+|^PO[\s_-]+\d/i.test(String(r[5]))))   // PO judged as an invoice before 2026.10.04-7, or a PO not yet on the tracker → look again
       { delete map[String(r[0])]; return; }   // judged before 6-digit invoice #s were recognised (2026-10-04) → look again
     if(r[8] && /^(filed|skipped)$/.test(String(r[6]))) map['md5:'+r[8]]=1; });   // same PDF in another email → don't redo it
