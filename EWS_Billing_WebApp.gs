@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.05-1 · built 2026-10-05 · Gmail auto-file labels use the Billing labels (filed → Billing/History, needs review → Billing/Customer Replies) and PO Request drafts + sent get Billing/PO Requests; a customer reply whose PDF doesn't read as our invoice but whose subject / file name names a tracker invoice goes to review instead of being skipped (51334 signed return); Morgan's AP submission emails (to accountspayableEWS, cc Chad, invoice # + PO #) auto-mark Signed invoices Paid; a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.06-1 · built 2026-10-06 · autopilot reminder drafts use the ONE reminder template (same as the site's Reminder button: plain text, "*** PLEASE SIGN AND RETURN ***", "{d} days outstanding" line, Chad's signature; no PAST DUE wording, no HTML banner); Gmail auto-file labels use the Billing labels (filed → Billing/History, needs review → Billing/Customer Replies) and PO Request drafts + sent get Billing/PO Requests; a customer reply whose PDF doesn't read as our invoice but whose subject / file name names a tracker invoice goes to review instead of being skipped (51334 signed return); Morgan's AP submission emails (to accountspayableEWS, cc Chad, invoice # + PO #) auto-mark Signed invoices Paid; a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.05-1', CODE_BUILT='2026-10-05';
+var CODE_VERSION='2026.10.06-1', CODE_BUILT='2026-10-06';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -932,20 +932,32 @@ function autopilotRun(preview){
 function apSendReminder_(x,type,em){
   try{
     var to=x.contactEmail||''; if(!to) return false;                       // need a supervisor email to send to
-    var unit=(x.unit==='755')?'Evolution Well Services - 755':'Evolution Well Services Operating LLC - 765';
-    var subj=(type==='signature'?'REMINDER · SIGN & RETURN · ':'PAST DUE · ')+x.operator+' - '+x.location+' - Invoice # '+x.inv;
-    var ask=(type==='signature')?'please review and SIGN AND RETURN the attached invoice':'this invoice is past due — please remit payment or advise on status';
-    var body='Hello '+(x.contactName||x.operator)+',\n\nFollowing up on the invoice below — '+ask+'.\n\n'
-      +'Billing Unit: '+unit+'\nInvoice #: '+x.inv+'\n'+x.operator+' - '+x.location+' - Fleet # '+x.fleet
-      +'\nAmount: $'+(Number(x.amount)||0).toLocaleString()+'\nInvoice date: '+x.date+'\n\nThank you,\nRevolution Energy Services · Accounts Receivable';
+    var E=apReminderEmail_(x,type), subj=E.subj, body=E.body;
     var cc=((type==='collections')?(em&&em.collections):(em&&em.reminder))||AUTOPILOT.CC;   // Collections CC for past-due, Reminder CC for signature
     var opts={ cc: cc.filter(function(e){return e.toLowerCase()!==to.toLowerCase();}).join(','), name:'Revolution Energy Services' };
     var atts=[]; var p1=apFetchPdf_(x.pdfUrl); if(p1) atts.push(p1); var p2=apFetchPdf_(x.poPdf); if(p2) atts.push(p2); if(atts.length) opts.attachments=atts;   // invoice + approved-PO PDF
-    if(type==='signature') opts.htmlBody='<div style="font:14px/1.55 Arial,sans-serif;color:#1b1b1b"><div style="background:#b3261e;color:#fff;font-weight:700;font-size:15px;padding:11px 15px;border-radius:6px;margin-bottom:14px">PLEASE SIGN AND RETURN THE ATTACHED INVOICE</div>'+esc_(body).replace(/\n/g,'<br>')+'</div>';
     if(AUTOPILOT.MODE==='send') GmailApp.sendEmail(to,subj,body,opts); else GmailApp.createDraft(to,subj,body,opts);
     updateRow_({inv:x.inv, poReq:x.poReq, field:'reminder', value:'Yes'});
     return true;
   }catch(e){ return false; }
+}
+/* ONE reminder template (Chad, 2026-10-06) — identical to reminder() in index.html. Plain text, no escalation ladder.
+   Autopilot only drafts 7+ days after the original request, so the "{d} days outstanding" line is always included. */
+var REMINDER_SIG = 'Chad M. Facchine\nRevolution Energy Services, Inc\nP 814.509.0030 | E CFacchine@revolution-es.com';
+function apReminderEmail_(x,type){
+  var unitShort=(x.unit==='755')?'Equipment Service (755)':'Operations (765)';
+  var unitLong =(x.unit==='755')?'Evolution Well Services - 755':'Evolution Well Services Operating LLC - 765';
+  var T = (type==='signature')         ? {head:'*** PLEASE SIGN AND RETURN ***', ask:'Please review and SIGN AND RETURN the attached invoice.'}
+        : (String(x.poAssigned)!=='Yes') ? {head:'*** PO NEEDED ***',            ask:'Please assign a PO to the attached invoice.'}
+        :                                {head:'*** PAYMENT STATUS ***',       ask:'Please advise on the payment status of the attached invoice.'};
+  var d=apDays_(x.date,new Date());
+  var m=String(x.date||'').match(/^(\d{4})-(\d{2})-(\d{2})/), dt=m?(Number(m[2])+'/'+Number(m[3])+'/'+m[1]):String(x.date||'');
+  var amt='$'+(Number(x.amount)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  var subj=x.operator+' - '+x.location+' - '+x.disc+' - '+unitShort+' - Fleet # '+x.fleet+' - Invoice # '+x.inv;
+  var body=T.head+'\n\n'+(d>0?('This invoice is now '+d+' days outstanding.\n\n'):'')+T.ask
+    +'\n\nBilling Unit : '+unitLong+'\n\nInvoice # '+x.inv+'\n'+x.operator+' - '+x.location+' - Fleet # '+x.fleet
+    +'\nAmount: '+amt+'\nInvoice date: '+dt+'\n\nPlease let me know if you have any questions.\n\n'+REMINDER_SIG;
+  return {subj:subj, body:body};
 }
 function apFetchPdf_(url){ try{ if(!url) return null; var m=String(url).match(/[-\w]{25,}/); return m?DriveApp.getFileById(m[0]).getBlob():null; }catch(e){ return null; } }
 function esc_(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
