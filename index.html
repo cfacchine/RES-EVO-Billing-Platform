@@ -2078,7 +2078,7 @@ async function reminder(id){
   var unit=x.unit==="755"?"Equipment Service (755)":"Operations (765)";
   var docLabel=x.inv?("Invoice # "+x.inv):("PO Request # "+(x.poReq||""));
   /* ONE reminder template (Chad, 2026-10-06) — same as the autopilot's apReminderEmail_ in the .gs; no escalation ladder.
-     Past the original request (sent REMIND_DAYS+ days ago) it adds "This invoice is now {d} days outstanding." */
+     Past the original request (sent REMIND_DAYS+ days ago) it adds the "*** … ***" header AND "This invoice is now {d} days outstanding."; before that, neither. */
   var T = (!x.inv && needsPO(x)) ? {head:"*** PO NEEDED ***",            ask:"Please provide a Customer PO for the PO Request below so we can invoice."}
         : needsSig(x)            ? {head:"*** PLEASE SIGN AND RETURN ***", ask:"Please review and SIGN AND RETURN the attached invoice."}
         : needsPO(x)             ? {head:"*** PO NEEDED ***",            ask:"Please assign a PO to the attached invoice."}
@@ -2086,7 +2086,7 @@ async function reminder(id){
   var sent=(x.sigAge!=null?x.sigAge:x.age)||0, d=x.age||0;
   var daysLine=(sent>=REMIND_DAYS && d>0) ? ("This "+(x.inv?"invoice":"PO Request")+" is now "+d+" days outstanding.\n\n") : "";
   var subj=x.operator+" - "+x.location+" - "+x.disc+" - "+unit+" - Fleet # "+x.fleet+" - "+docLabel;
-  var body=T.head+"\n\n"+daysLine+T.ask+"\n\nBilling Unit : "+(x.unit==="755"?"Evolution Well Services - 755":"Evolution Well Services Operating LLC - 765")
+  var body=(daysLine?(T.head+"\n\n"+daysLine):"")+T.ask+"\n\nBilling Unit : "+(x.unit==="755"?"Evolution Well Services - 755":"Evolution Well Services Operating LLC - 765")
     +"\n\n"+docLabel+"\n"+x.operator+" - "+x.location+" - Fleet # "+x.fleet+"\nAmount: "+money(x.amount)+"\n"+(x.inv?"Invoice date: ":"Request date: ")+fmtDate(x.date)+"\n\nPlease let me know if you have any questions.";
   body=withSig(body);
   var attached=false, fname=(x.inv?"Invoice_":"PO_Request_")+(x.inv||x.poReq||"doc")+".pdf";
