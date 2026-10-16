@@ -923,16 +923,16 @@ function renderReady(){
 function buildInvoiceFromRow(id){
   var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
   var v=(x.unit==="765")?"ops":"eq", s=state[v];
-  var mem=loadRec(x.poReq)||loadRec(x.inv);
+  var pk=pickRec(x,[x.poReq,x.inv]), mem=pk.mem;
   s.fleet=x.fleet||s.fleet; s.operator=x.operator; s.location=x.location; s.disc=x.disc;
-  s.notes=(mem&&mem.notes)||x.notes||""; s.start=(mem&&mem.start)||x.start||""; s.end=(mem&&mem.end)||x.end||"";
+  s.notes=pk.notes; s.start=pk.start; s.end=pk.end;
   s.poReq=x.poReq||""; s.po=x.po||""; s.inv=x.inv||nextInv(B[v].key==="755"?"51":"50"); s.mode="INVOICE";
-  var rec=RECORDS[x.poReq]||RECORDS[x.inv], memLines=mem&&(mem.rawLines||mem.lines);
-  s.lines=(memLines&&memLines.length)? memLines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};}) : ((rec&&rec.lines&&rec.lines.length)? rec.lines.slice() : [{idx:"",qty:1,techs:1,rate:0}]);
+  s.lines=pk.lines||[{idx:"",qty:1,techs:1,rate:0}];
   if(mem&&mem.contact){ s.contact=mem.contact; if(mem.contactInfo)s.contactInfo=mem.contactInfo; } else { var f=fleetRec(s.fleet); if(f) s.contact=f.name; }
   applyContact(v,s.contact); if(!s.contactInfo && mem && mem.contactInfo) s.contactInfo=mem.contactInfo;
   switchView(v); renderBuilder(v);
-  toast("Building invoice for "+x.poReq+(rec||mem?" with its details":"")+" — confirm the Customer PO #, then Generate");
+  toast("Building invoice for "+x.poReq+(pk.lines?" with its details":"")+" — confirm the Customer PO #, then Generate");
+  checkPulledTotal(v,x);
 }
 
 /* ---- Collections: AR statement PDF + 20+ day reminder drafts ---- */
@@ -1906,22 +1906,49 @@ async function postToSheet(body){ body=Object.assign({},body,{session:SESSION?SE
 function recKey(k){ return "revo-rec:"+String(k||"").trim().toLowerCase(); }
 function saveRec(keys,rec){ try{ (Array.isArray(keys)?keys:[keys]).forEach(function(k){ if(k&&String(k).trim()) localStorage.setItem(recKey(k),JSON.stringify(rec)); }); }catch(e){} }
 function loadRec(k){ try{ var s=localStorage.getItem(recKey(k)); return s?JSON.parse(s):null; }catch(e){ return null; } }
+/* Pick which copy of a record to load into the builder. The SHEET is the source of truth — any device can save a row —
+   so its Line Items (and the start/end/notes packed with them) win. This browser's localStorage copy is only a
+   fallback for rows the sheet has no line items for (pre-pack rows, offline mode).
+   Before 2026-10-16 the browser copy won: Pull on EWS-POR-000035 loaded the 9/22 draft kept in this browser ($16,850)
+   instead of the 10/14 version on the sheet and in Drive ($24,025). */
+function normLines(a){ return (a||[]).map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};}); }
+function pickRec(x,keys){
+  keys=(keys||[]).filter(function(k){return k&&String(k).trim();});
+  var mem=null, rec=null;
+  keys.some(function(k){ mem=loadRec(k); return !!mem; });
+  keys.some(function(k){ rec=RECORDS[k]||null; return !!rec; });
+  var sheetLines=(rec&&rec.lines&&rec.lines.length)?rec.lines:((x&&x.lineItems&&x.lineItems.length)?x.lineItems:null);
+  var memLines=mem&&(mem.rawLines||mem.lines); if(!(memLines&&memLines.length)) memLines=null;
+  var rh=(rec&&rec.header)||{}, xx=x||{}, mm=mem||{};
+  if(sheetLines) return { src:"sheet", lines:normLines(sheetLines), mem:mem,
+    start:rh.start||xx.start||mm.start||"", end:rh.end||xx.end||mm.end||"", notes:rh.notes||xx.notes||mm.notes||"" };
+  if(memLines) return { src:"browser", lines:normLines(memLines), mem:mem,
+    start:mm.start||xx.start||"", end:mm.end||xx.end||"", notes:mm.notes||xx.notes||"" };
+  return { src:"", lines:null, mem:mem, start:xx.start||mm.start||"", end:xx.end||mm.end||"", notes:xx.notes||mm.notes||"" };
+}
+/* After loading a record: warn if its line items don't add up to the tracker's Amount Billed (e.g. the amount was typed into the sheet by hand). */
+function checkPulledTotal(v,x){
+  if(!x||x.amount==null) return;
+  var gt=state[v].lines.reduce(function(a,L){return a+lineTotal(v,L);},0);
+  if(gt>0 && Math.abs(gt-(Number(x.amount)||0))>0.5)
+    toast("Heads up: line items total "+money(gt)+" but the tracker says "+money(x.amount)+" for "+(x.inv||x.poReq)+" — check before sending","warn");
+}
 
 /* Feature 2: pull an existing record into the builder */
 function openRecord(id){
   var x=DATA.rows.find(function(r){return r.id===id;}); if(!x) return;
   var v=x.unit==="765"?"ops":"eq", s=state[v];
-  var mem=loadRec(x.poReq)||loadRec(x.inv);
+  var pk=pickRec(x,[x.poReq,x.inv]), mem=pk.mem;
   s.fleet=x.fleet||s.fleet; s.operator=x.operator; s.location=x.location; s.disc=x.disc;
   s.po=x.po||""; s.poReq=x.poReq||""; s.inv=x.inv||"";
-  s.notes=(mem&&mem.notes)||x.notes||""; s.start=(mem&&mem.start)||x.start||""; s.end=(mem&&mem.end)||x.end||"";
-  var rec=RECORDS[x.poReq]||RECORDS[x.inv], memLines=mem&&(mem.rawLines||mem.lines);
-  s.lines=(memLines&&memLines.length)? memLines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};}) : (rec? rec.lines.slice() : [{idx:"",qty:1,techs:1,rate:0}]);
+  s.notes=pk.notes; s.start=pk.start; s.end=pk.end;
+  s.lines=pk.lines||[{idx:"",qty:1,techs:1,rate:0}];
   s.mode = x.inv? "INVOICE":"PO REQUEST";
   if(mem&&mem.contact){ s.contact=mem.contact; if(mem.contactInfo)s.contactInfo=mem.contactInfo; } else { var f=fleetRec(s.fleet); if(f){ s.contact=f.name; } }
   applyContact(v,s.contact); if(!s.contactInfo && mem && mem.contactInfo) s.contactInfo=mem.contactInfo;
   switchView(v); renderBuilder(v);
-  toast("Loaded #"+(x.inv||x.poReq)+" into the "+B[v].title+" builder"+(rec||mem?" with its details":" — re-add line items"));
+  toast("Loaded #"+(x.inv||x.poReq)+" into the "+B[v].title+" builder"+(pk.lines?" with its details":" — re-add line items"));
+  checkPulledTotal(v,x);
 }
 
 /* Invoice-from-PO-Request: type a PO Request # → pull its data into the invoice */
@@ -1929,22 +1956,21 @@ function pullFromPoReq(v){
   var s=state[v], b=B[v], q=String(s.poReq||"").trim();
   if(!q){ toast("Type a PO Request # first (e.g. EWS-POR-000024)","warn"); return; }
   var ql=q.toLowerCase();
-  var x=DATA.rows.find(function(r){return String(r.poReq||"").trim().toLowerCase()===ql;});
-  var rec=RECORDS[q]||RECORDS[s.poReq];
-  var mem=loadRec(q);
+  // Prefer the sheet row that carries line items (a PO Request # can sit on more than one row once invoiced).
+  var xs=DATA.rows.filter(function(r){return String(r.poReq||"").trim().toLowerCase()===ql;});
+  var x=xs.find(function(r){return r.lineItems&&r.lineItems.length;})||xs[0];
+  var pk=pickRec(x,[x&&x.poReq,q,s.poReq]), mem=pk.mem, rec=RECORDS[(x&&x.poReq)||q]||RECORDS[q];
   if(!x && !rec && !mem){ toast("No PO Request found for "+q+" — check the number","warn"); return; }
-  var h=mem||(rec&&rec.header)||x||{};
+  var h=x||(rec&&rec.header)||mem||{};            // sheet row first — this browser's copy can be an old draft
   if(h.operator) s.operator=h.operator;
   if(h.location) s.location=h.location;
   if(h.disc)     s.disc=h.disc;
-  if(h.fleet)    s.fleet=h.fleet; else if(x&&x.fleet) s.fleet=x.fleet;
-  if(h.start)    s.start=h.start;
-  if(h.end)      s.end=h.end;
-  if(h.notes)    s.notes=h.notes;
-  var memLines = mem&&(mem.rawLines||mem.lines);
-  var hadLines = (memLines&&memLines.length)||(rec&&rec.lines&&rec.lines.length);
-  if(memLines&&memLines.length) s.lines=memLines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};});
-  else if(rec&&rec.lines&&rec.lines.length) s.lines=rec.lines.slice();
+  if(h.fleet)    s.fleet=h.fleet;
+  if(pk.start)   s.start=pk.start;
+  if(pk.end)     s.end=pk.end;
+  if(pk.notes)   s.notes=pk.notes;
+  var hadLines = !!pk.lines;
+  if(pk.lines) s.lines=pk.lines;
   s.mode="INVOICE";
   if(!s.inv) s.inv=nextInv(b.key==="755"?"51":"50");
   if(h.po) s.po=h.po;                        // prefill Customer PO # if the PO Request already carries one
@@ -1954,6 +1980,7 @@ function pullFromPoReq(v){
   if(!s.contactInfo && mem && mem.contactInfo) s.contactInfo=mem.contactInfo;
   renderBuilder(v);
   toast("Pulled "+q+(hadLines?" with its line items":" — re-add line items")+" · now enter the Customer PO #");
+  checkPulledTotal(v,x);
 }
 
 function openModal(v){ currentDocV=v; var h=buildDoc(v); document.getElementById("modalDoc").innerHTML=h; document.getElementById("printMount").innerHTML=h; document.getElementById("pdfModal").classList.add("open"); }
@@ -2100,17 +2127,15 @@ async function reminder(id){
   // 2) fallback: rebuild the document from the record's line items — no saved Drive link needed
   if(!attached && CONFIG.GOOGLE_CLIENT_ID){
     var vv=(x.unit==="765")?"ops":"eq";
-    var mem=loadRec(x.poReq)||loadRec(x.inv), recc=RECORDS[x.poReq]||RECORDS[x.inv];
-    var memLines=mem&&(mem.rawLines||mem.lines);
-    var lines=(memLines&&memLines.length)?memLines:((recc&&recc.lines&&recc.lines.length)?recc.lines:((x.lineItems&&x.lineItems.length)?x.lineItems:null));
+    var pk=pickRec(x,[x.poReq,x.inv]), mem=pk.mem, lines=pk.lines;   // sheet first, this browser's copy only as a fallback
     if(lines){
       var snap=JSON.parse(JSON.stringify(state[vv]));
       try{ toast("Rebuilding the "+(x.inv?"invoice":"PO request")+" PDF…");
         var s=state[vv];
         s.mode=x.inv?"INVOICE":"PO REQUEST"; s.fleet=x.fleet||""; s.operator=x.operator||""; s.location=x.location||""; s.disc=x.disc||"";
         s.po=x.po||""; s.poReq=x.poReq||""; s.inv=x.inv||"";
-        s.notes=(mem&&mem.notes)||x.notes||""; s.start=(mem&&mem.start)||x.start||""; s.end=(mem&&mem.end)||x.end||"";
-        s.lines=lines.map(function(L){return {idx:(L.idx===undefined?"":L.idx),qty:(L.qty==null?1:L.qty),techs:(L.techs==null?1:L.techs),rate:(L.rate==null?0:L.rate)};});
+        s.notes=pk.notes; s.start=pk.start; s.end=pk.end;
+        s.lines=lines;
         if(mem&&mem.contact){ s.contact=mem.contact; if(mem.contactInfo)s.contactInfo=mem.contactInfo; } else { var cr=contactForRow(x); if(cr){ s.contact=cr.name||s.contact; s.contactInfo=[cr.phone,cr.email].filter(Boolean).join("  ·  "); } }
         applyContact(vv,s.contact);
         var pdf=await makeDocPdf(vv);
