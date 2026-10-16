@@ -1,7 +1,7 @@
-/* ==== VERSION 2026.10.06-2 · built 2026-10-06 · reminder header line only shown past the original request; autopilot reminder drafts use the ONE reminder template (same as the site's Reminder button: plain text, "*** PLEASE SIGN AND RETURN ***", "{d} days outstanding" line, Chad's signature; no PAST DUE wording, no HTML banner); Gmail auto-file labels use the Billing labels (filed → Billing/History, needs review → Billing/Customer Replies) and PO Request drafts + sent get Billing/PO Requests; a customer reply whose PDF doesn't read as our invoice but whose subject / file name names a tracker invoice goes to review instead of being skipped (51334 signed return); Morgan's AP submission emails (to accountspayableEWS, cc Chad, invoice # + PO #) auto-mark Signed invoices Paid; a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
+/* ==== VERSION 2026.10.16-1 · built 2026-10-16 · linkDriveFiles keeps a row's current link while that file is still on Drive, otherwise picks the NEWEST copy (it used to pick A→Z = the oldest date, which swapped POR-32/35/37/38 back to stale PO Requests); saving a document now really replaces the earlier copy (the old-copy search used the 6-digit POR # and missed the 5-digit file names, so superseded copies piled up); 0 · Inbox reads underscore names like "signed Invoice_500495.pdf"; reminder header line only shown past the original request; autopilot reminder drafts use the ONE reminder template (same as the site's Reminder button: plain text, "*** PLEASE SIGN AND RETURN ***", "{d} days outstanding" line, Chad's signature; no PAST DUE wording, no HTML banner); Gmail auto-file labels use the Billing labels (filed → Billing/History, needs review → Billing/Customer Replies) and PO Request drafts + sent get Billing/PO Requests; a customer reply whose PDF doesn't read as our invoice but whose subject / file name names a tracker invoice goes to review instead of being skipped (51334 signed return); Morgan's AP submission emails (to accountspayableEWS, cc Chad, invoice # + PO #) auto-mark Signed invoices Paid; a PDF named/laid out as a customer PO is judged as a PO even if it quotes our invoice #, and an unknown PO says 'not on the tracker'; emails the old subject-only scanner filed are re-verified; a customer's reply to our 'SIGN, DATE, and REPLY ALL' email counts as a signed return; summary sends PO Request + Invoice PDFs separately; 6-digit invoice #s (510078) recognised; 0 · Inbox opens each PDF before filing it as a customer PO / signed invoice (POR-37 fix); Gmail auto-file opens + verifies each PDF before filing (customer POs, signed invoices); Mark PO received works on rows with no invoice # ==== */
 /*  ↑ Compare this line with the top of the file on GitHub before you paste/deploy. If they differ, you have an
     old copy. Anyone changing this file: bump CODE_VERSION + CODE_BUILT below AND this line (YYYY.MM.DD-n). */
-var CODE_VERSION='2026.10.06-2', CODE_BUILT='2026-10-06';
+var CODE_VERSION='2026.10.16-1', CODE_BUILT='2026-10-16';
 function whatVersion(){ var v='EWS_Billing_WebApp.gs version '+CODE_VERSION+' (built '+CODE_BUILT+')'; Logger.log(v); return v; }   // Run ▸ whatVersion
 
 /*************************************************************************************************
@@ -501,11 +501,15 @@ function savePdf_(p,action){
 
 /* Trash earlier copies of the SAME document in the folder: same "<Job ID> - <Step> <Doc #> - " prefix (the date
    and tail may differ), or the exact same name. */
+/* 2026-10-16: compares every name in the stage folder with the POR # padding normalised. The old version searched
+   Drive for the tracker's 6-digit "EWS-POR-000035", which never matches the 5-digit file names ("EWS-POR-00035 - …"),
+   so each re-save left the earlier copy behind (POR-32 had 5 PO Request copies). */
+function porPad_(s){ return String(s||'').replace(/(EWSO?\s*-?\s*POR\s*-?\s*(?:[A-Z]{2}\s*-?\s*)?)0*(\d+)/i,'$1$2').toUpperCase(); }
 function trashSameDoc_(folder,p,action,fname){
-  var key=schemeKey_(p,action), probe=cleanName_(p.poReq||p.inv||p.po||'');
-  var it=probe?folder.searchFiles('title contains "'+probe.replace(/["\\]/g,'')+'" and trashed = false'):folder.getFilesByName(fname);
-  while(it.hasNext()){ var f=it.next(), n=f.getName(); if(n===fname || n.indexOf(key)===0) f.setTrashed(true); }
-  var ex=folder.getFilesByName(fname); while(ex.hasNext()){ var e=ex.next(); if(!e.isTrashed()) e.setTrashed(true); }
+  var raw=schemeKey_(p,action), key=porPad_(raw), fn=porPad_(fname), it=folder.getFiles();
+  var byPrefix=!!String(p.poReq||'').trim() || (action!=='po' && !/PENDING - $/.test(raw));   // no Job ID and no doc # → exact name only (never "1 PO Request - …" for everything)
+  while(it.hasNext()){ var f=it.next(); if(f.isTrashed()) continue;
+    var n=porPad_(f.getName()); if(n===fn || (byPrefix && n.indexOf(key)===0)) f.setTrashed(true); }
 }
 
 /* ============================ APPEND / UPDATE (Billing Tracker tab) ============================ */
@@ -1285,7 +1289,7 @@ function inboxLog_(ss,rows){ if(!rows.length) return; var sh=inboxLogSheet_(ss);
    for the invoice number. Returns '' when the name carries no clearly-labelled invoice number. */
 function invNumFromName_(name){
   var s=String(name||'');
-  var m=s.match(/\bInv(?:oice)?\.?\s*#?\s*(?:EWS[-\s]*)?(\d{4,6})\b/i);   // "Invoice 50494", "Inv #50494", "Invoice EWS-50494"
+  var m=s.match(/\bInv(?:oice)?\.?[\s_]*#?[\s_]*(?:EWS[-_\s]*)?(\d{4,6})(?!\d)/i);   // "Invoice 50494", "Inv #50494", "Invoice EWS-50494", "Invoice_500495"
   if(m) return m[1];
   m=s.match(/\bEWS[-\s]*(\d{4,6})\b/i);                                   // bare "EWS-50494" (POR #s never match: letters follow EWS-)
   return m?m[1]:'';
@@ -1315,10 +1319,14 @@ function linkDriveFiles(){
     if(/^EWSO?PO\d+$/.test(cp)){ (byCustPo[cp]=byCustPo[cp]||[]).push(r);     // one customer PO can cover several invoices
       var cn=cp.replace(/^EWSO?PO/,''); (byCustPoNum[cn]=byCustPoNum[cn]||[]).push(r); }   // digits-only fallback: "EWSO-PO-4471" typed on a row vs "EWS-PO-4471" on the PO
   }
-  // When two DIFFERENT files claim one row+column, keep the plain scheme name: no "(…)" qualifier first
-  // (e.g. "EWSO-PO-1867 - … - 765.pdf" beats "EWSO-PO-1867 - … - 765 (Change Order 1 - closed to 0.00).pdf"), then the shorter, then A→Z.
-  var better_=function(n1,n2){ var q1=/\(/.test(n1)?1:0, q2=/\(/.test(n2)?1:0; if(q1!==q2) return q1<q2;
-    if(n1.length!==n2.length) return n1.length<n2.length; return n1.localeCompare(n2)<0; };
+  // When two DIFFERENT files claim one row+column: the row's CURRENT link wins while that file is still on Drive
+  // (authoritative pass below). Otherwise keep the plain scheme name: no "(…)" qualifier first (e.g. "EWSO-PO-1867 - … - 765.pdf"
+  // beats "… - 765 (Change Order 1 - closed to 0.00).pdf"), then the NEWEST copy (Drive created time), then the shorter, then A→Z.
+  // Before 2026-10-16 the newest rule was missing, so A→Z picked the OLDEST date and swapped POR-32/35/37/38 to stale PO Requests.
+  var better_=function(a,b){ var q1=/\(/.test(a.name)?1:0, q2=/\(/.test(b.name)?1:0; if(q1!==q2) return q1<q2;
+    if(a.created!==b.created) return a.created>b.created;
+    if(a.name.length!==b.name.length) return a.name.length<b.name.length; return a.name.localeCompare(b.name)<0; };
+  var idOf_=function(u){ var m=String(u||'').match(/\/d\/([A-Za-z0-9_-]{20,})/)||String(u||'').match(/[?&]id=([A-Za-z0-9_-]{20,})/); return m?m[1]:''; };
   var root=DriveApp.getFolderById(DRIVE_ROOT), scanned=0, unmatched=[], dups=[], renamed=0;
   // Classify each PDF by its FILENAME (independent of folder layout); the four PDF columns are always managed.
   var COL={ inv:col_(m,A.invPdf), sgn:col_(m,A.sgnPdf), req:col_(m,A.poReqPdf), po:col_(m,A.poPdf) };
@@ -1351,22 +1359,24 @@ function linkDriveFiles(){
     } else return;
     if(col<0) return;
     if(!rows.length){ if(unmatched.length<25) unmatched.push(name); return; }
+    var me={url:file.getUrl(),name:name,id:file.getId(),created:file.getDateCreated().getTime()};
     rows.forEach(function(rowIdx){
       var slot=desired[col][rowIdx];
-      if(!slot){ desired[col][rowIdx]={url:file.getUrl(),name:name}; return; }
-      if(slot.name===name) return;                                          // same file seen twice — ignore
-      var a={url:file.getUrl(),name:name};                                  // two DIFFERENT files claim one row+column
-      var keep=better_(name,slot.name)?a:slot, drop=(keep===a)?slot:a;
-      desired[col][rowIdx]=keep;
-      if(dups.length<25) dups.push('"'+keep.name+'"  · also · "'+drop.name+'"');
+      if(!slot){ desired[col][rowIdx]={best:me,ids:[me.id],all:[me]}; return; }
+      if(slot.ids.indexOf(me.id)>=0) return;                                // same file seen twice — ignore
+      slot.ids.push(me.id); slot.all.push(me);                              // two DIFFERENT files claim one row+column
+      if(better_(me,slot.best)) slot.best=me;
     });
   });
   // AUTHORITATIVE pass: for every data row × each of the four PDF columns, set the matched link or CLEAR a stale one.
   var linked=0, cleared=0;
   for(var rr=hr+1;rr<vals.length;rr++){
     for(var kk in managed){ var ci=managed[kk];
-      var want=(desired[ci]&&desired[ci][rr])?desired[ci][rr].url:'';
-      var cur=String(vals[rr][ci]||'');
+      var slot=desired[ci]&&desired[ci][rr], cur=String(vals[rr][ci]||''), want='';
+      if(slot){ var pick=slot.best, curId=idOf_(cur);
+        if(curId && slot.ids.indexOf(curId)>=0) pick=slot.all[slot.ids.indexOf(curId)];   // current link still on Drive → keep it
+        want=pick.url;
+        if(slot.all.length>1 && dups.length<25) dups.push('"'+pick.name+'"  · also · '+slot.all.filter(function(o){ return o!==pick; }).map(function(o){ return '"'+o.name+'"'; }).join(' · ')); }
       if(want){ if(cur!==want){ sh.getRange(rr+1,ci+1).setValue(want); vals[rr][ci]=want; linked++; } }
       else if(cur && /drive\.google\.com/i.test(cur)){ sh.getRange(rr+1,ci+1).setValue(''); vals[rr][ci]=''; cleared++; }
     }
@@ -1540,7 +1550,7 @@ function classifyInboxPdf_(X,f,name){
   function find(text){
     var o={por:[],inv:[],cp:[]}, s=String(text||''), mm, rx=/EWSO?\s*-?\s*POR\s*-?\s*(?:[A-Z]{2}\s*-?\s*)?\d+/gi;
     while((mm=rx.exec(s))){ var k=porNorm_(mm[0]); if(X.byPoReq[k]) o.por=o.por.concat(X.byPoReq[k]); }
-    var rxi=/\b(5[01]\d{3,4})\b/g; while((mm=rxi.exec(s))){ if(X.byInv[mm[1]]!=null && o.inv.indexOf(mm[1])<0) o.inv.push(mm[1]); }
+    var rxi=/(?:^|[^0-9])(5[01]\d{3,4})(?![0-9])/g; /* not \b: "Invoice_500495" has no word break before the 5 (sat in 0 · Inbox 9/29–10/16) */ while((mm=rxi.exec(s))){ if(X.byInv[mm[1]]!=null && o.inv.indexOf(mm[1])<0) o.inv.push(mm[1]); }
     var ns=normId_(s); X.custPoKeys.forEach(function(k){ if(k.length>=5 && ns.indexOf(k)>=0) o.cp.push(k); });
     return o;
   }
