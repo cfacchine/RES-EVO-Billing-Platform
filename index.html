@@ -594,7 +594,7 @@ table.data tbody tr.is-draft>td,table.data tbody tr.is-draft:hover>td{background
         <svg viewBox="0 0 24 24" width="31" height="31" fill="none" stroke="#1a7a3e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
       </div>
       <div id="ackTitle" style="font-family:'Archivo',sans-serif;font-weight:800;font-size:18.5px;color:#12331d;margin-bottom:7px">Done</div>
-      <div id="ackMsg" style="font-size:13.5px;line-height:1.5;color:#3a473f;margin-bottom:22px"></div>
+      <div id="ackMsg" style="white-space:pre-line;font-size:13.5px;line-height:1.5;color:#3a473f;margin-bottom:22px"></div>
       <button id="ackOk" onclick="closeAck()" style="background:#1a7a3e;color:#fff;border:0;border-radius:9px;padding:11px 34px;font-weight:700;font-size:14px;cursor:pointer;font-family:'Archivo',sans-serif;box-shadow:0 4px 14px rgba(26,122,62,.32)">OK</button>
     </div>
   </div>
@@ -2088,9 +2088,18 @@ async function emailDraft(v){
     try{ toast("Preparing your Gmail draft with the PDF attached…");
       var pdf=await makeDocPdf(v);
       if(!pdf.ok||!pdf.blob){ toast("PDF integrity check failed ("+pdf.reason+") — no draft created. Please click Email again.","warn"); ackPopup("Draft Not Created — PDF Incomplete","The attachment didn’t render completely ("+pdf.reason+"), so no Gmail draft was created.  This prevents a cut-off PDF from being sent.\n\nPlease click Email again — it normally succeeds on the next attempt."); return; }
-      var extra=null;   // on an invoice, also attach the approved customer-PO PDF if the Inbox auto-file has stored it on the row
-      if(s.mode==="INVOICE"){ try{ var rowPo=(DATA.rows||[]).find(function(r){return s.poReq&&String(r.poReq||"")===String(s.poReq||"");}); if(rowPo&&rowPo.poPdf){ var pb=await fetchDrivePdf(rowPo.poPdf); if(pb) extra={blob:pb,fname:"Approved_PO_"+((s.po||s.poReq||"").toString().replace(/[^\w.-]/g,"_"))+".pdf"}; } }catch(e){} }
-      await gmailCreateDraft(to,cc,subj,body,pdf.blob,pdfName(v),extra); toast("Gmail draft created"+(extra?" with both PDFs":" with the PDF")+" attached — open Gmail → Drafts"); ackPopup("Email Draft Created","Your Gmail draft has been created"+(extra?" with the invoice and the approved-PO PDF attached":" with the PDF attached")+".  Open Gmail → Drafts to review and send."); return; }
+      var extra=[];   // on an invoice, also attach the approved customer-PO PDF if the Inbox auto-file has stored it on the row
+      if(s.mode==="INVOICE"){ try{ var rowPo=(DATA.rows||[]).find(function(r){return s.poReq&&String(r.poReq||"")===String(s.poReq||"");}); if(rowPo&&rowPo.poPdf){ var pb=await fetchDrivePdf(rowPo.poPdf); if(pb) extra.push({blob:pb,fname:"Approved_PO_"+((s.po||s.poReq||"").toString().replace(/[^\w.-]/g,"_"))+".pdf"}); } }catch(e){} }
+      var tallyMiss="";   // 755 Equipment Service PO Requests + Invoices always carry the pad's Tally Sheet (Chad, 2026-10-31)
+      if(B[v].key==="755"){ toast("Finding the "+(s.operator||"")+" - "+(s.location||"")+" Tally Sheet…");
+        var ts; try{ ts=await findTallySheet(s.operator,s.location); }catch(e){ ts={err:"Drive lookup failed ("+((e&&e.message)||e)+")"}; }
+        if(ts&&ts.blob) extra.push(ts); else tallyMiss=(ts&&ts.err)||"not found"; }
+      await gmailCreateDraft(to,cc,subj,body,pdf.blob,pdfName(v),extra);
+      var names=[pdfName(v)].concat(extra.map(function(e){return e.fname;}));
+      if(tallyMiss){ toast("Gmail draft created — Tally Sheet NOT attached ("+tallyMiss+")","warn");
+        ackPopup("Draft Created — Tally Sheet Missing","Your Gmail draft has been created with:\n• "+names.join("\n• ")+"\n\nThe Tally Sheet was NOT attached: "+tallyMiss+".\n\nThe apt-pc sync copies it from RES Dropbox › Evolution Well Services › _Pad Certs › "+(s.operator||"")+" - "+(s.location||"")+".zip into Drive › EWS Billing › "+TALLY_FOLDER+" every 15 minutes. If this pad's cert pack has no tally sheet yet, attach it by hand in Gmail before sending."); return; }
+      toast("Gmail draft created with "+names.length+" PDF"+(names.length>1?"s":"")+" attached — open Gmail → Drafts");
+      ackPopup("Email Draft Created","Your Gmail draft has been created with "+(names.length>1?"these attachments":"the PDF attached")+":\n• "+names.join("\n• ")+"\n\nOpen Gmail → Drafts to review and send."); return; }
     catch(e){ toast("Couldn’t create the attached draft (Gmail permission needed) — opened a compose window instead. Use “Download PDF” to attach.","warn"); }
   }
   openGmail(to,cc,subj,body);
@@ -2152,12 +2161,45 @@ async function reminder(id){
   ackPopup("Reminder Created", "A reminder draft for "+docLabel+" (Fleet # "+x.fleet+") has been "+(attached?"created in Gmail with the "+(x.inv?"invoice":"PO request")+" PDF attached.  Open Gmail → Drafts to send.":"opened in a compose window.  No saved PDF or line items were on file to rebuild the document, so nothing could be attached — open the record in the builder and use “Download PDF” to attach it."));
 }
 async function fetchDrivePdf(pdfUrl){
-  var m=String(pdfUrl||"").match(/[-\w]{25,}/); if(!m) return null;   // extract the Drive file id from the saved URL
-  var token=GAPI.token||await gmailToken();
-  var r=await fetch("https://www.googleapis.com/drive/v3/files/"+m[0]+"?alt=media",{headers:{Authorization:"Bearer "+token}});
+  var m=String(pdfUrl||"").match(/[-\w]{25,}/); if(!m) return null;   // extract the Drive file id from the saved URL (or a bare id)
+  var r=await authFetch("https://www.googleapis.com/drive/v3/files/"+m[0]+"?alt=media&supportsAllDrives=true");
   if(!r.ok) throw new Error("drive "+r.status);
   return await r.blob();
 }
+/* Google API fetch with the Gmail/Drive token; an expired token (401, after ~1 h) is re-requested once. */
+async function authFetch(url,opts){ opts=opts||{};
+  for(var i=0;i<2;i++){ var token=GAPI.token||await gmailToken();
+    var r=await fetch(url,Object.assign({},opts,{headers:Object.assign({},opts.headers||{},{Authorization:"Bearer "+token})}));
+    if(r.status!==401||i) return r; GAPI.token=null; } }
+/* Tally Sheet (Chad, 2026-10-31): every 755 Equipment Service PO Request + Invoice draft also attaches the pad's Tally Sheet PDF.
+   It lives in RES Dropbox › Evolution Well Services › _Pad Certs › "<Operator> - <Pad>.zip" as "<Operator> - <Pad> - Tally Sheet.pdf".
+   tools/sync_tally_sheets.ps1 (scheduled task on apt-pc, every 15 min) copies each one into Drive › EWS Billing › _Tally Sheets;
+   this finds it there by operator + pad, punctuation/spaces ignored ("Pole Cat" = "Polecat"). → {blob,fname} or {err} */
+var TALLY_FOLDER="_Tally Sheets";
+function tallyKey(x){ return String(x||"").toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]/g,""); }
+function tallyParse(name){   // "EQT - Polecat - Tally Sheet.pdf" → {op:"eqt", pad:"polecat"}
+  var base=String(name||"").replace(/\.pdf$/i,"").replace(/\s*-?\s*tally\s*sheet\s*$/i,""), parts=base.split(/\s+-\s+/);
+  return {op:tallyKey(parts[0]), pad:tallyKey(parts.slice(1).join(" "))}; }
+function tallyPick(files,operator,location){   // files newest first → best match or null
+  var op=tallyKey(operator), pad=tallyKey(location); if(!op||!pad) return null;
+  var same=(files||[]).filter(function(f){ return /tally\s*sheet/i.test(f.name) && /\.pdf$/i.test(f.name); })
+    .map(function(f){ var t=tallyParse(f.name); t.f=f; return t; }).filter(function(t){ return t.op===op && t.pad; });
+  var hit=same.find(function(t){ return t.pad===pad; })
+       || same.find(function(t){ return t.pad.length>=4 && pad.length>=4 && (t.pad.indexOf(pad)>=0 || pad.indexOf(t.pad)>=0); });
+  return hit?hit.f:null; }
+async function driveList(q){
+  var r=await authFetch("https://www.googleapis.com/drive/v3/files?pageSize=500&orderBy=modifiedTime%20desc&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name,modifiedTime)&q="+encodeURIComponent(q));
+  if(!r.ok) throw new Error("drive "+r.status); return ((await r.json()).files)||[]; }
+async function findTallySheet(operator,location){
+  if(!tallyKey(operator)||!tallyKey(location)) return {err:"this record has no operator / pad"};
+  var dirs=await driveList("name='"+TALLY_FOLDER+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  if(!dirs.length) return {err:"Drive › EWS Billing › "+TALLY_FOLDER+" not found"};
+  var files=await driveList("("+dirs.map(function(d){ return "'"+d.id+"' in parents"; }).join(" or ")+") and trashed=false");
+  var f=tallyPick(files,operator,location);
+  if(!f) return {err:"no tally sheet for "+operator+" - "+location+" in "+TALLY_FOLDER};
+  var blob=await fetchDrivePdf(f.id), chk=blob?await _pdfBytesOk(blob):{ok:false,reason:"empty download"};
+  if(!chk.ok) return {err:f.name+" is not a usable PDF ("+chk.reason+")"};
+  return {blob:blob, fname:f.name}; }
 
 /* ============================ TRACKER EDITOR ============================ */
 function renderTracker(){
@@ -2317,21 +2359,22 @@ function gmailToken(){ return new Promise(function(res,rej){
   var tc=google.accounts.oauth2.initTokenClient({ client_id:CONFIG.GOOGLE_CLIENT_ID, scope:"https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/drive.readonly", hint:AUTH_EMAIL||undefined, hd:CONFIG.ALLOWED_DOMAIN||undefined, callback:function(t){ if(t&&t.access_token){ GAPI.token=t.access_token; res(t.access_token); } else rej("token"); } });
   tc.requestAccessToken({prompt:""});
 }); }
-async function gmailCreateDraft(to,cc,subject,body,pdfBlob,fname,extra){
-  var token=GAPI.token||await gmailToken();
+async function gmailCreateDraft(to,cc,subject,body,pdfBlob,fname,extra){   // extra: one {blob,fname} or a list of them (approved PO, tally sheet)
   function b64of(bl){ return bl? new Promise(function(r){var fr=new FileReader();fr.onload=function(){r(fr.result.split(",")[1]);};fr.readAsDataURL(bl);}) : Promise.resolve(""); }
   var b64=await b64of(pdfBlob);
-  var eb64=(extra&&extra.blob)? await b64of(extra.blob) : "";
+  var extras=[].concat(extra||[]).filter(function(e){ return e&&e.blob; }), eb64=[];
+  for(var ei=0;ei<extras.length;ei++) eb64.push(await b64of(extras[ei].blob));
   var bnd="revo_"+Math.random().toString(36).slice(2);
   // Email headers must be ASCII — encode any non-ASCII subject as an RFC 2047 encoded-word so it never mojibakes.
   var subjHdr = /[^\x00-\x7F]/.test(String(subject||"")) ? "=?UTF-8?B?"+btoa(unescape(encodeURIComponent(subject)))+"?=" : subject;
   var mime="To: "+to+"\r\nCc: "+cc.join(", ")+"\r\nSubject: "+subjHdr+"\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\""+bnd+"\"\r\n\r\n"
     +"--"+bnd+"\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"+body+"\r\n\r\n";
   if(b64) mime+="--"+bnd+"\r\nContent-Type: application/pdf; name=\""+fname+"\"\r\nContent-Disposition: attachment; filename=\""+fname+"\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"+b64+"\r\n";
-  if(eb64) mime+="--"+bnd+"\r\nContent-Type: application/pdf; name=\""+extra.fname+"\"\r\nContent-Disposition: attachment; filename=\""+extra.fname+"\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"+eb64+"\r\n";
+  extras.forEach(function(e,i){ var fn=String(e.fname||("attachment_"+(i+1)+".pdf")).replace(/["\r\n]/g,"");
+    if(eb64[i]) mime+="--"+bnd+"\r\nContent-Type: application/pdf; name=\""+fn+"\"\r\nContent-Disposition: attachment; filename=\""+fn+"\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"+eb64[i]+"\r\n"; });
   mime+="--"+bnd+"--";
   var raw=btoa(unescape(encodeURIComponent(mime))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-  var r=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({message:{raw:raw}})});
+  var r=await authFetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:{raw:raw}})});
   if(!r.ok) throw new Error("gmail "+r.status);
   return r.json();
 }
