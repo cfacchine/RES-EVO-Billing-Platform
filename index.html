@@ -2090,16 +2090,17 @@ async function emailDraft(v){
       if(!pdf.ok||!pdf.blob){ toast("PDF integrity check failed ("+pdf.reason+") — no draft created. Please click Email again.","warn"); ackPopup("Draft Not Created — PDF Incomplete","The attachment didn’t render completely ("+pdf.reason+"), so no Gmail draft was created.  This prevents a cut-off PDF from being sent.\n\nPlease click Email again — it normally succeeds on the next attempt."); return; }
       var extra=[];   // on an invoice, also attach the approved customer-PO PDF if the Inbox auto-file has stored it on the row
       if(s.mode==="INVOICE"){ try{ var rowPo=(DATA.rows||[]).find(function(r){return s.poReq&&String(r.poReq||"")===String(s.poReq||"");}); if(rowPo&&rowPo.poPdf){ var pb=await fetchDrivePdf(rowPo.poPdf); if(pb) extra.push({blob:pb,fname:"Approved_PO_"+((s.po||s.poReq||"").toString().replace(/[^\w.-]/g,"_"))+".pdf"}); } }catch(e){} }
-      var tallyMiss="";   // 755 Equipment Service PO Requests + Invoices always carry the pad's Tally Sheet (Chad, 2026-10-31)
+      var tallyMiss="", ts=null;   // 755 Equipment Service PO Requests + Invoices always carry the pad's Tally Sheet (Chad, 2026-10-31)
       if(B[v].key==="755"){ toast("Finding the "+(s.operator||"")+" - "+(s.location||"")+" Tally Sheet…");
-        var ts; try{ ts=await findTallySheet(s.operator,s.location); }catch(e){ ts={err:"Drive lookup failed ("+((e&&e.message)||e)+")"}; }
+        try{ ts=await findTallySheet(s.operator,s.location); }catch(e){ ts={err:"Drive lookup failed ("+((e&&e.message)||e)+")"}; }
         if(ts&&ts.blob) extra.push(ts); else tallyMiss=(ts&&ts.err)||"not found"; }
       await gmailCreateDraft(to,cc,subj,body,pdf.blob,pdfName(v),extra);
       var names=[pdfName(v)].concat(extra.map(function(e){return e.fname;}));
       if(tallyMiss){ toast("Gmail draft created — Tally Sheet NOT attached ("+tallyMiss+")","warn");
         ackPopup("Draft Created — Tally Sheet Missing","Your Gmail draft has been created with:\n• "+names.join("\n• ")+"\n\nThe Tally Sheet was NOT attached: "+tallyMiss+".\n\nThe apt-pc sync copies it from RES Dropbox › Evolution Well Services › _Pad Certs › "+(s.operator||"")+" - "+(s.location||"")+".zip into Drive › EWS Billing › "+TALLY_FOLDER+" every 15 minutes. If this pad's cert pack has no tally sheet yet, attach it by hand in Gmail before sending."); return; }
       toast("Gmail draft created with "+names.length+" PDF"+(names.length>1?"s":"")+" attached — open Gmail → Drafts");
-      ackPopup("Email Draft Created","Your Gmail draft has been created with "+(names.length>1?"these attachments":"the PDF attached")+":\n• "+names.join("\n• ")+"\n\nOpen Gmail → Drafts to review and send."); return; }
+      var fuzzy=(ts&&ts.fuzzy)?"\n\nCheck the Tally Sheet: it was matched by the closest pad name (“"+ts.fname+"” for pad “"+(s.location||"")+"”).":"";
+      ackPopup("Email Draft Created","Your Gmail draft has been created with "+(names.length>1?"these attachments":"the PDF attached")+":\n• "+names.join("\n• ")+fuzzy+"\n\nOpen Gmail → Drafts to review and send."); return; }
     catch(e){ toast("Couldn’t create the attached draft (Gmail permission needed) — opened a compose window instead. Use “Download PDF” to attach.","warn"); }
   }
   openGmail(to,cc,subj,body);
@@ -2199,7 +2200,7 @@ async function findTallySheet(operator,location){
   if(!f) return {err:"no tally sheet for "+operator+" - "+location+" in "+TALLY_FOLDER};
   var blob=await fetchDrivePdf(f.id), chk=blob?await _pdfBytesOk(blob):{ok:false,reason:"empty download"};
   if(!chk.ok) return {err:f.name+" is not a usable PDF ("+chk.reason+")"};
-  return {blob:blob, fname:f.name}; }
+  return {blob:blob, fname:f.name, fuzzy:tallyParse(f.name).pad!==tallyKey(location)}; }
 
 /* ============================ TRACKER EDITOR ============================ */
 function renderTracker(){
@@ -2356,7 +2357,11 @@ function signOut(){ setSession(null); try{ localStorage.removeItem("revo-sum"); 
 /* Gmail API: obtain a compose token on demand, then create a draft with the PDF attached. */
 function gmailToken(){ return new Promise(function(res,rej){
   if(!(window.google&&google.accounts&&google.accounts.oauth2)){ rej("gis"); return; }
-  var tc=google.accounts.oauth2.initTokenClient({ client_id:CONFIG.GOOGLE_CLIENT_ID, scope:"https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/drive.readonly", hint:AUTH_EMAIL||undefined, hd:CONFIG.ALLOWED_DOMAIN||undefined, callback:function(t){ if(t&&t.access_token){ GAPI.token=t.access_token; res(t.access_token); } else rej("token"); } });
+  var done=false, fin=function(f,x){ if(!done){ done=true; clearTimeout(tmo); f(x); } };
+  var tmo=setTimeout(function(){ fin(rej,"token timeout"); },60000);   // a blocked or closed sign-in popup must never leave Email Draft hanging
+  var tc=google.accounts.oauth2.initTokenClient({ client_id:CONFIG.GOOGLE_CLIENT_ID, scope:"https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/drive.readonly", hint:AUTH_EMAIL||undefined, hd:CONFIG.ALLOWED_DOMAIN||undefined,
+    callback:function(t){ if(t&&t.access_token){ GAPI.token=t.access_token; fin(res,t.access_token); } else fin(rej,"token"); },
+    error_callback:function(e){ fin(rej,(e&&e.type)||"token"); } });
   tc.requestAccessToken({prompt:""});
 }); }
 async function gmailCreateDraft(to,cc,subject,body,pdfBlob,fname,extra){   // extra: one {blob,fname} or a list of them (approved PO, tally sheet)
